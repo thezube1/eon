@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -13,6 +13,104 @@ supabase: Client = create_client(
     os.getenv('SUPABASE_URL'),
     os.getenv('SUPABASE_KEY')
 )
+
+@health_bp.route('/devices/<device_id>/latest', methods=['GET'])
+def get_latest_metrics(device_id):
+    try:
+        # First verify the device exists
+        device_response = supabase.table('devices').select('id').eq('device_id', device_id).execute()
+        if not device_response.data:
+            return jsonify({'error': 'Device not found'}), 404
+        
+        device_internal_id = device_response.data[0]['id']
+        
+        # Get latest heart rate
+        heart_rate_response = supabase.table('heart_rate_measurements')\
+            .select('timestamp, bpm, source, context')\
+            .eq('device_id', device_internal_id)\
+            .order('timestamp', desc=True)\
+            .limit(1)\
+            .execute()
+        
+        # Get latest step count
+        steps_response = supabase.table('step_counts')\
+            .select('date, step_count, source')\
+            .eq('device_id', device_internal_id)\
+            .order('date', desc=True)\
+            .limit(1)\
+            .execute()
+        
+        # Get latest sleep record
+        sleep_response = supabase.table('sleep_records')\
+            .select('start_time, end_time, sleep_stage, source')\
+            .eq('device_id', device_internal_id)\
+            .order('end_time', desc=True)\
+            .limit(1)\
+            .execute()
+        
+        return jsonify({
+            'heart_rate': heart_rate_response.data[0] if heart_rate_response.data else None,
+            'steps': steps_response.data[0] if steps_response.data else None,
+            'sleep': sleep_response.data[0] if sleep_response.data else None
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@health_bp.route('/devices/<device_id>/metrics', methods=['GET'])
+def get_metrics_by_interval(device_id):
+    try:
+        # Get query parameters with defaults
+        start_date = request.args.get('start_date', (datetime.utcnow() - timedelta(days=7)).isoformat())
+        end_date = request.args.get('end_date', datetime.utcnow().isoformat())
+        
+        # First verify the device exists
+        device_response = supabase.table('devices').select('id').eq('device_id', device_id).execute()
+        if not device_response.data:
+            return jsonify({'error': 'Device not found'}), 404
+        
+        device_internal_id = device_response.data[0]['id']
+        
+        # Get heart rate data within interval
+        heart_rate_response = supabase.table('heart_rate_measurements')\
+            .select('timestamp, bpm, source, context')\
+            .eq('device_id', device_internal_id)\
+            .gte('timestamp', start_date)\
+            .lte('timestamp', end_date)\
+            .order('timestamp', desc=True)\
+            .execute()
+        
+        # Get step data within interval (using just the date part of timestamps)
+        steps_response = supabase.table('step_counts')\
+            .select('date, step_count, source')\
+            .eq('device_id', device_internal_id)\
+            .gte('date', start_date[:10])\
+            .lte('date', end_date[:10])\
+            .order('date', desc=True)\
+            .execute()
+        
+        # Get sleep data within interval
+        sleep_response = supabase.table('sleep_records')\
+            .select('start_time, end_time, sleep_stage, source')\
+            .eq('device_id', device_internal_id)\
+            .gte('start_time', start_date)\
+            .lte('end_time', end_date)\
+            .order('end_time', desc=True)\
+            .execute()
+        
+        return jsonify({
+            'heart_rate': heart_rate_response.data,
+            'steps': steps_response.data,
+            'sleep': sleep_response.data,
+            'metadata': {
+                'start_date': start_date,
+                'end_date': end_date,
+                'device_id': device_id
+            }
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @health_bp.route('/sync', methods=['POST'])
 def sync_health_data():
