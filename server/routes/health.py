@@ -203,4 +203,39 @@ def sync_health_data():
         })
 
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@health_bp.route('/devices/<device_id>/sync-status', methods=['GET'])
+def get_sync_status(device_id):
+    try:
+        # First verify the device exists
+        device_response = supabase.table('devices').select('id').eq('device_id', device_id).execute()
+        if not device_response.data:
+            return jsonify({'error': 'Device not found'}), 404
+        
+        device_internal_id = device_response.data[0]['id']
+        
+        # Get all sync statuses for this device
+        sync_response = supabase.table('sync_status')\
+            .select('metric_type, last_sync_time')\
+            .eq('device_id', device_internal_id)\
+            .execute()
+        
+        # Convert list of records to a more convenient format
+        sync_status = {
+            'heart_rate': None,
+            'steps': None,
+            'sleep': None
+        }
+        
+        for record in sync_response.data:
+            sync_status[record['metric_type']] = record['last_sync_time']
+            
+        return jsonify({
+            'device_id': device_id,
+            'sync_status': sync_status,
+            'last_sync': max([ts for ts in sync_status.values() if ts is not None], default=None)
+        })
+
+    except Exception as e:
         return jsonify({'error': str(e)}), 500 
