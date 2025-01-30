@@ -8,10 +8,10 @@
 import SwiftUI
 
 @main
-struct eonApp: App {
+struct LongevityApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            OnboardingView()
         }
     }
 }
