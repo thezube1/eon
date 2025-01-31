@@ -10,9 +10,22 @@
 		4B7D69A92D4C30790062BC03 /* eon.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = eon.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		E3BD86C92D4C426D00FF023B /* Exceptions for "eon" folder in "eon" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 4B7D69A82D4C30790062BC03 /* eon */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		4B7D69AB2D4C30790062BC03 /* eon */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				E3BD86C92D4C426D00FF023B /* Exceptions for "eon" folder in "eon" target */,
+			);
 			path = eon;
 			sourceTree = "<group>";
 		};
@@ -256,7 +269,7 @@
 				DEVELOPMENT_TEAM = K74GLH832Z;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_FILE = eon/Info.plist;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -286,7 +299,7 @@
 				DEVELOPMENT_TEAM = K74GLH832Z;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_FILE = eon/Info.plist;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";

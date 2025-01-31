@@ -8,10 +8,21 @@
 import SwiftUI
 
 @main
-struct LongevityApp: App {
+struct eonApp: App {
+    @StateObject private var healthManager = HealthManager()
+    @AppStorage("HealthKitAuthorized") private var isAuthorized: Bool = false
+
     var body: some Scene {
         WindowGroup {
-            OnboardingView()
+            if isAuthorized {
+                HomeView().environmentObject(healthManager)
+            } else {
+                OnboardingView()
+                    .environmentObject(healthManager)
+                    .onAppear {
+                        isAuthorized = healthManager.isAuthorized
+                    }
+            }
         }
     }
 }
