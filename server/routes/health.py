@@ -3,22 +3,43 @@ from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
 from supabase import create_client, Client
+import logging
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Load environment variables from .env file if it exists
 load_dotenv()
 
 health_bp = Blueprint('health', __name__)
 
+def init_supabase():
+    """Initialize Supabase client with better error handling"""
+    try:
+        supabase_url = os.environ.get('SUPABASE_URL')
+        supabase_key = os.environ.get('SUPABASE_KEY')
+        
+        # Log environment variable status (without exposing sensitive data)
+        logger.info(f"Supabase URL present: {bool(supabase_url)}")
+        logger.info(f"Supabase Key present: {bool(supabase_key)}")
+        
+        if not supabase_url or not supabase_key:
+            available_env_vars = ', '.join(os.environ.keys())
+            logger.error(f"Missing required environment variables. Available environment variables: {available_env_vars}")
+            raise ValueError("Supabase URL and key must be provided in environment variables")
+            
+        return create_client(supabase_url, supabase_key)
+    except Exception as e:
+        logger.error(f"Failed to initialize Supabase client: {str(e)}")
+        raise
+
 # Initialize Supabase client
 try:
-    supabase_url = os.getenv('SUPABASE_URL')
-    supabase_key = os.getenv('SUPABASE_KEY')
-    
-    if not supabase_url or not supabase_key:
-        raise ValueError("Supabase URL and key must be provided in environment variables")
-        
-    supabase = create_client(supabase_url, supabase_key)
+    supabase = init_supabase()
+    logger.info("Supabase client initialized successfully")
 except Exception as e:
-    print(f"Failed to initialize Supabase client: {str(e)}")
+    logger.error(f"Failed to initialize Supabase client: {str(e)}")
     raise
 
 @health_bp.route('/devices/<device_id>/latest', methods=['GET'])
