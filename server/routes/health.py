@@ -3,7 +3,6 @@ from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
 from supabase import create_client, Client
-from supabase._sync.client import SyncClient
 
 load_dotenv()
 
@@ -11,10 +10,13 @@ health_bp = Blueprint('health', __name__)
 
 # Initialize Supabase client
 try:
-    supabase = SyncClient(
-        "https://teywcjjsffwlvlawueze.supabase.co",
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRleXdjampzZmZ3bHZsYXd1ZXplIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczODI3NTYzNywiZXhwIjoyMDUzODUxNjM3fQ.U7bW40zIoMZEg335gMFWWlh43N7bODBLFmGk8PGeejM"
-    )
+    supabase_url = os.getenv('SUPABASE_URL')
+    supabase_key = os.getenv('SUPABASE_KEY')
+    
+    if not supabase_url or not supabase_key:
+        raise ValueError("Supabase URL and key must be provided in environment variables")
+        
+    supabase = create_client(supabase_url, supabase_key)
 except Exception as e:
     print(f"Failed to initialize Supabase client: {str(e)}")
     raise
