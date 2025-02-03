@@ -3,16 +3,21 @@ from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
 from supabase import create_client, Client
+from supabase._sync.client import SyncClient
 
 load_dotenv()
 
 health_bp = Blueprint('health', __name__)
 
 # Initialize Supabase client
-supabase: Client = create_client(
-    os.getenv('SUPABASE_URL'),
-    os.getenv('SUPABASE_KEY')
-)
+try:
+    supabase = SyncClient(
+        "https://teywcjjsffwlvlawueze.supabase.co",
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRleXdjampzZmZ3bHZsYXd1ZXplIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczODI3NTYzNywiZXhwIjoyMDUzODUxNjM3fQ.U7bW40zIoMZEg335gMFWWlh43N7bODBLFmGk8PGeejM"
+    )
+except Exception as e:
+    print(f"Failed to initialize Supabase client: {str(e)}")
+    raise
 
 @health_bp.route('/devices/<device_id>/latest', methods=['GET'])
 def get_latest_metrics(device_id):
@@ -238,4 +243,11 @@ def get_sync_status(device_id):
         })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500 
+        return jsonify({'error': str(e)}), 500
+
+@health_bp.route('/test', methods=['GET'])
+def test_route():
+    return jsonify({
+        'status': 'ok',
+        'message': 'Health API is running'
+    }) 
