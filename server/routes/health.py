@@ -22,22 +22,11 @@ health_bp = Blueprint('health', __name__)
 def init_supabase():
     """Initialize Supabase client with better error handling"""
     try:
-        # Log all environment variables (excluding sensitive values)
-        env_vars = {k: '***' if 'KEY' in k or 'SECRET' in k else v 
-                   for k, v in os.environ.items()}
-        logger.debug(f"Environment variables: {env_vars}")
+        # Hardcoded Supabase credentials
+        supabase_url = "https://teywcjjsffwlvlawueze.supabase.co"
+        supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRleXdjampzZmZ3bHZsYXd1ZXplIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczODI3NTYzNywiZXhwIjoyMDUzODUxNjM3fQ.U7bW40zIoMZEg335gMFWWlh43N7bODBLFmGk8PGeejM"
         
-        supabase_url = os.environ.get('SUPABASE_URL')
-        supabase_key = os.environ.get('SUPABASE_KEY')
-        
-        # Log environment variable status (without exposing sensitive data)
-        logger.info(f"Supabase URL present: {bool(supabase_url)}")
-        logger.info(f"Supabase Key present: {bool(supabase_key)}")
-        
-        if not supabase_url or not supabase_key:
-            available_env_vars = ', '.join(k for k in os.environ.keys())
-            logger.error(f"Missing required environment variables. Available environment variables: {available_env_vars}")
-            raise ValueError("Supabase URL and key must be provided in environment variables")
+        logger.info("Initializing Supabase client with hardcoded credentials")
         
         # Initialize client with a timeout
         client = create_client(supabase_url, supabase_key)
