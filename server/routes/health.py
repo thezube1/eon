@@ -4,9 +4,14 @@ import os
 from dotenv import load_dotenv
 from supabase import create_client, Client
 import logging
+import sys
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging to output to stdout for Cloud Run
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file if it exists
@@ -17,6 +22,11 @@ health_bp = Blueprint('health', __name__)
 def init_supabase():
     """Initialize Supabase client with better error handling"""
     try:
+        # Log all environment variables (excluding sensitive values)
+        env_vars = {k: '***' if 'KEY' in k or 'SECRET' in k else v 
+                   for k, v in os.environ.items()}
+        logger.debug(f"Environment variables: {env_vars}")
+        
         supabase_url = os.environ.get('SUPABASE_URL')
         supabase_key = os.environ.get('SUPABASE_KEY')
         
@@ -25,13 +35,20 @@ def init_supabase():
         logger.info(f"Supabase Key present: {bool(supabase_key)}")
         
         if not supabase_url or not supabase_key:
-            available_env_vars = ', '.join(os.environ.keys())
+            available_env_vars = ', '.join(k for k in os.environ.keys())
             logger.error(f"Missing required environment variables. Available environment variables: {available_env_vars}")
             raise ValueError("Supabase URL and key must be provided in environment variables")
-            
-        return create_client(supabase_url, supabase_key)
+        
+        # Initialize client with a timeout
+        client = create_client(supabase_url, supabase_key)
+        
+        # Test the connection
+        client.table('devices').select('id').limit(1).execute()
+        logger.info("Successfully tested Supabase connection")
+        
+        return client
     except Exception as e:
-        logger.error(f"Failed to initialize Supabase client: {str(e)}")
+        logger.error(f"Failed to initialize Supabase client: {str(e)}", exc_info=True)
         raise
 
 # Initialize Supabase client
@@ -39,7 +56,7 @@ try:
     supabase = init_supabase()
     logger.info("Supabase client initialized successfully")
 except Exception as e:
-    logger.error(f"Failed to initialize Supabase client: {str(e)}")
+    logger.error(f"Failed to initialize Supabase client: {str(e)}", exc_info=True)
     raise
 
 @health_bp.route('/devices/<device_id>/latest', methods=['GET'])
@@ -270,7 +287,9 @@ def get_sync_status(device_id):
 
 @health_bp.route('/test', methods=['GET'])
 def test_route():
+    """Simple health check that doesn't require Supabase"""
     return jsonify({
         'status': 'ok',
-        'message': 'Health API is running'
+        'message': 'Health API is running',
+        'environment': os.environ.get('FLASK_ENV', 'unknown')
     }) 

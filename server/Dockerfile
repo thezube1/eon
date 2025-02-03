@@ -20,9 +20,12 @@ COPY . .
 ENV PYTHONUNBUFFERED=1
 ENV FLASK_APP=app.py
 ENV FLASK_ENV=production
+ENV PORT=8000
+ENV WORKERS=2
+ENV TIMEOUT=120
 
 # Expose the port the app runs on
 EXPOSE 8000
 
 # Command to run the application with Gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "4", "--access-logfile", "-", "--error-logfile", "-", "--log-level", "info", "app:app"] 
+CMD exec gunicorn --bind :$PORT --workers $WORKERS --timeout $TIMEOUT --access-logfile - --error-logfile - --log-level debug app:app 
