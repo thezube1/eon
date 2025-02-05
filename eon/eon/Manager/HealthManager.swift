@@ -7,9 +7,12 @@
 
 import Foundation
 import HealthKit
+import UIKit
 
 class HealthManager: ObservableObject {
     let healthStore = HKHealthStore()
+    private let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? "unknown"
+    @Published var lastSyncTime: Date?
     
     @Published var isAuthorized: Bool {
         didSet {
@@ -113,4 +116,172 @@ class HealthManager: ObservableObject {
         }
         healthStore.execute(query)
     }
+    
+    // Add this function to your HealthManager class:
+    func syncWithServer() async {
+        do {
+            print("Starting sync with deviceId: \(deviceId)")
+            
+            // First try to sync health data to create the device if it doesn't exist
+            var initialHealthData: [String: [[String: Any]]] = [:]
+            
+            // Get initial data from the last 24 hours
+            let oneDayAgo = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
+            
+            if let heartRateData = await fetchHeartRateDataSince(oneDayAgo) {
+                initialHealthData["heart_rate"] = heartRateData
+            }
+            if let stepData = await fetchStepDataSince(oneDayAgo) {
+                initialHealthData["steps"] = stepData
+            }
+            if let sleepData = await fetchSleepDataSince(oneDayAgo) {
+                initialHealthData["sleep"] = sleepData
+            }
+            
+            // Initial sync to ensure device exists
+            try await NetworkManager.shared.syncHealthData(deviceId: deviceId, healthData: initialHealthData)
+            print("Initial sync completed successfully")
+            
+            // Now get the sync status
+            let syncStatus = try await NetworkManager.shared.getSyncStatus(deviceId: deviceId)
+            let lastSync = syncStatus.lastSync.flatMap { ISO8601DateFormatter().date(from: $0) }
+            print("Retrieved sync status, last sync: \(lastSync?.description ?? "never")")
+            
+            // If we have a last sync time, get data since then
+            if let lastSync = lastSync {
+                var healthData: [String: [[String: Any]]] = [:]
+                
+                if let heartRateData = await fetchHeartRateDataSince(lastSync) {
+                    healthData["heart_rate"] = heartRateData
+                }
+                if let stepData = await fetchStepDataSince(lastSync) {
+                    healthData["steps"] = stepData
+                }
+                if let sleepData = await fetchSleepDataSince(lastSync) {
+                    healthData["sleep"] = sleepData
+                }
+                
+                if !healthData.isEmpty {
+                    try await NetworkManager.shared.syncHealthData(deviceId: deviceId, healthData: healthData)
+                    print("Incremental sync completed successfully")
+                }
+            }
+            
+            // Update last sync time
+            DispatchQueue.main.async {
+                self.lastSyncTime = Date()
+            }
+        } catch {
+            print("Error syncing with server: \(error)")
+        }
+    }
+    
+    // Add these helper functions to fetch data since last sync:
+    private func fetchHeartRateDataSince(_ date: Date?) async -> [[String: Any]]? {
+        guard let heartRateType = HKQuantityType.quantityType(forIdentifier: .heartRate) else { return nil }
+        
+        let predicate = date.map { HKQuery.predicateForSamples(withStart: $0, end: Date(), options: .strictStartDate) }
+        
+        return await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(sampleType: heartRateType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, error in
+                guard let samples = samples as? [HKQuantitySample], error == nil else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                
+                let heartRateData = samples.map { sample -> [String: Any] in
+                    [
+                        "timestamp": ISO8601DateFormatter().string(from: sample.startDate),
+                        "bpm": sample.quantity.doubleValue(for: HKUnit(from: "count/min")),
+                        "source": sample.sourceRevision.source.name
+                    ]
+                }
+                
+                continuation.resume(returning: heartRateData)
+            }
+            
+            healthStore.execute(query)
+        }
+    }
+    
+    private func fetchStepDataSince(_ date: Date?) async -> [[String: Any]]? {
+        guard let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount) else { return nil }
+        
+        let startDate = date ?? Calendar.current.date(byAdding: .day, value: -1, to: Date())!
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: Date(), options: .strictStartDate)
+        
+        return await withCheckedContinuation { continuation in
+            let query = HKStatisticsCollectionQuery(
+                quantityType: stepType,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum,
+                anchorDate: Calendar.current.startOfDay(for: startDate),
+                intervalComponents: DateComponents(day: 1)
+            )
+            
+            query.initialResultsHandler = { _, results, error in
+                guard let results = results, error == nil else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                
+                var stepData: [[String: Any]] = []
+                results.enumerateStatistics(from: startDate, to: Date()) { statistics, _ in
+                    if let sum = statistics.sumQuantity() {
+                        // Convert step count to integer
+                        let stepCount = Int(sum.doubleValue(for: HKUnit.count()))
+                        print("Processing step count for \(statistics.startDate): \(stepCount)")
+                        
+                        stepData.append([
+                            "date": ISO8601DateFormatter().string(from: statistics.startDate),
+                            "step_count": stepCount,
+                            "source": "HealthKit"
+                        ])
+                    }
+                }
+                
+                continuation.resume(returning: stepData)
+            }
+            
+            healthStore.execute(query)
+        }
+    }
+    
+    private func fetchSleepDataSince(_ date: Date?) async -> [[String: Any]]? {
+        guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else { return nil }
+        
+        // If no date provided, look back 2 days
+        let startDate = date ?? Calendar.current.date(byAdding: .day, value: -2, to: Date())!
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: Date(), options: .strictStartDate)
+        let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+        
+        return await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(sampleType: sleepType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: [sortDescriptor]) { _, samples, error in
+                if let error = error {
+                    print("Error fetching sleep data for sync: \(error)")
+                    continuation.resume(returning: nil)
+                    return
+                }
+                
+                let sleepData = samples?
+                    .compactMap { $0 as? HKCategorySample }
+                    .filter { $0.value == HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue }
+                    .map { sample -> [String: Any] in
+                        print("Processing sleep sample - Start: \(sample.startDate), End: \(sample.endDate), Duration: \(sample.endDate.timeIntervalSince(sample.startDate) / 3600) hours")
+                        return [
+                            "start_time": ISO8601DateFormatter().string(from: sample.startDate),
+                            "end_time": ISO8601DateFormatter().string(from: sample.endDate),
+                            "sleep_stage": "asleep",
+                            "source": sample.sourceRevision.source.name
+                        ]
+                    }
+                
+                print("Found \(sleepData?.count ?? 0) sleep records for sync")
+                continuation.resume(returning: sleepData)
+            }
+            
+            healthStore.execute(query)
+        }
+    }
+
 }

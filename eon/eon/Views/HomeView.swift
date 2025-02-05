@@ -9,10 +9,14 @@ import SwiftUI
 
 struct HomeView: View {
     @EnvironmentObject var healthManager: HealthManager  // Correctly reference the shared object
+    @State private var isSyncing = false
 
     var body: some View {
         VStack(spacing: 20) {
             // Top: Longevity Score
+            if isSyncing {
+                ProgressView("Syncing...")
+            }
             VStack {
                 Text("\(calculateLongevityScore())")
                     .font(.largeTitle)
@@ -50,13 +54,36 @@ struct HomeView: View {
             .background(Color.white.shadow(radius: 2))
         }
         .padding()
+        .task {
+            // Request authorization and sync when view appears
+            healthManager.requestAuthorization { success, error in
+                if success {
+                    Task {
+                        await syncData()
+                    }
+                } else if let error = error {
+                    print("HealthKit authorization failed: \(error)")
+                }
+            }
+        }
+        .refreshable {
+            // Allow manual refresh with pull-to-refresh
+            await syncData()
+        }
     }
+    
+        
     
     func calculateLongevityScore() -> Int {
         let sleepScore = min((healthManager.sleepHours / 8) * 100, 100)
         let stepScore = min((healthManager.stepCount / 8000) * 100, 100)
         let hrScore = max(100 - (abs(65 - healthManager.heartRate) * 2), 0)
         return Int((sleepScore + stepScore + hrScore) / 3)
+    }
+    private func syncData() async {
+        isSyncing = true
+        await healthManager.syncWithServer()
+        isSyncing = false
     }
 }
 

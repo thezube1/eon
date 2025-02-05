@@ -150,25 +150,38 @@ def get_metrics_by_interval(device_id):
 def sync_health_data():
     try:
         data = request.get_json()
+        logger.info("Received sync request with data structure: %s", {k: type(v) for k, v in data.items()})
         
         # Extract device info
         device_info = data.get('device_info')
         if not device_info or 'device_id' not in device_info:
             return jsonify({'error': 'Device information is required'}), 400
 
-        # Check if device exists and upsert
+        # First try to get existing device
         device_response = supabase.table('devices').select('id').eq('device_id', device_info['device_id']).execute()
         
-        if not device_response.data:
+        if device_response.data:
+            # Device exists, get its ID
+            device_id = device_response.data[0]['id']
+            logger.info(f"Found existing device with ID: {device_id}")
+            
+            # Update device info
+            supabase.table('devices').update({
+                'device_name': device_info.get('device_name'),
+                'device_model': device_info.get('device_model'),
+                'os_version': device_info.get('os_version'),
+                'last_active': datetime.utcnow().isoformat()
+            }).eq('id', device_id).execute()
+        else:
             # Insert new device
+            logger.info("Creating new device record")
             device_response = supabase.table('devices').insert({
                 'device_id': device_info['device_id'],
                 'device_name': device_info.get('device_name'),
                 'device_model': device_info.get('device_model'),
                 'os_version': device_info.get('os_version')
             }).execute()
-        
-        device_id = device_response.data[0]['id']
+            device_id = device_response.data[0]['id']
 
         # Process heart rate data
         heart_rate_data = data.get('heart_rate', [])
@@ -180,18 +193,43 @@ def sync_health_data():
                 'source': reading.get('source'),
                 'context': reading.get('context')
             } for reading in heart_rate_data]
+            logger.info(f"Inserting {len(heart_rate_records)} heart rate records")
             supabase.table('heart_rate_measurements').insert(heart_rate_records).execute()
 
-        # Process step data
+        # Process step data with upsert logic
         step_data = data.get('steps', [])
         if step_data:
-            step_records = [{
-                'device_id': device_id,
-                'date': reading['date'],
-                'step_count': reading['step_count'],
-                'source': reading.get('source')
-            } for reading in step_data]
-            supabase.table('step_counts').upsert(step_records).execute()
+            try:
+                step_records = []
+                for reading in step_data:
+                    try:
+                        step_count = int(float(reading['step_count']))
+                        record = {
+                            'device_id': device_id,
+                            'date': reading['date'],
+                            'step_count': step_count,
+                            'source': reading.get('source', 'HealthKit')
+                        }
+                        step_records.append(record)
+                    except (ValueError, TypeError) as e:
+                        logger.error(f"Error processing step record: {reading}, Error: {str(e)}")
+                        continue
+
+                if step_records:
+                    logger.info(f"Upserting {len(step_records)} step records")
+                    # Use ON CONFLICT DO UPDATE
+                    result = supabase.table('step_counts').upsert(
+                        step_records,
+                        on_conflict='device_id,date'
+                    ).execute()
+                    logger.info(f"Step records upsert result: {result}")
+                else:
+                    logger.warning("No valid step records to insert")
+
+            except Exception as e:
+                logger.error(f"Error upserting step data: {str(e)}", exc_info=True)
+                # Continue processing other data even if steps fail
+                pass
 
         # Process sleep data
         sleep_data = data.get('sleep', [])
@@ -203,9 +241,10 @@ def sync_health_data():
                 'sleep_stage': record.get('sleep_stage'),
                 'source': record.get('source')
             } for record in sleep_data]
+            logger.info(f"Inserting {len(sleep_records)} sleep records")
             supabase.table('sleep_records').insert(sleep_records).execute()
 
-        # Update sync status for each metric type
+        # Update sync status
         current_time = datetime.utcnow().isoformat()
         sync_records = []
         
@@ -229,14 +268,24 @@ def sync_health_data():
             })
 
         if sync_records:
-            supabase.table('sync_status').upsert(sync_records).execute()
+            logger.info(f"Updating sync status for {len(sync_records)} metrics")
+            supabase.table('sync_status').upsert(
+                sync_records,
+                on_conflict='device_id,metric_type'
+            ).execute()
 
         return jsonify({
             'message': 'Health data synchronized successfully',
-            'device_id': device_id
+            'device_id': device_id,
+            'metrics_synced': {
+                'heart_rate': len(heart_rate_data),
+                'steps': len(step_data),
+                'sleep': len(sleep_data)
+            }
         })
 
     except Exception as e:
+        logger.error(f"Error in sync_health_data: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @health_bp.route('/devices/<device_id>/sync-status', methods=['GET'])
