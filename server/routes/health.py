@@ -291,18 +291,23 @@ def sync_health_data():
 @health_bp.route('/devices/<device_id>/sync-status', methods=['GET'])
 def get_sync_status(device_id):
     try:
+        logger.info(f"Getting sync status for device: {device_id}")
+        
         # First verify the device exists
         device_response = supabase.table('devices').select('id').eq('device_id', device_id).execute()
         if not device_response.data:
             return jsonify({'error': 'Device not found'}), 404
         
         device_internal_id = device_response.data[0]['id']
+        logger.info(f"Found device with internal ID: {device_internal_id}")
         
         # Get all sync statuses for this device
         sync_response = supabase.table('sync_status')\
-            .select('metric_type, last_sync_time')\
+            .select('*')\
             .eq('device_id', device_internal_id)\
             .execute()
+            
+        logger.info(f"Retrieved sync records: {sync_response.data}")
         
         # Convert list of records to a more convenient format
         sync_status = {
@@ -311,16 +316,25 @@ def get_sync_status(device_id):
             'sleep': None
         }
         
+        last_sync = None
         for record in sync_response.data:
-            sync_status[record['metric_type']] = record['last_sync_time']
+            metric_type = record['metric_type']
+            sync_time = record['last_sync_time']
+            sync_status[metric_type] = sync_time
+            
+            # Update last_sync if this is the most recent sync
+            if last_sync is None or sync_time > last_sync:
+                last_sync = sync_time
+                
+        logger.info(f"Formatted sync status: {sync_status}, Last sync: {last_sync}")
             
         return jsonify({
-            'device_id': device_id,
             'sync_status': sync_status,
-            'last_sync': max([ts for ts in sync_status.values() if ts is not None], default=None)
+            'last_sync': last_sync
         })
 
     except Exception as e:
+        logger.error(f"Error getting sync status: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @health_bp.route('/test', methods=['GET'])

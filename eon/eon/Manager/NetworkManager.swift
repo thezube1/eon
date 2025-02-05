@@ -50,13 +50,20 @@ struct SleepData: Codable {
 }
 
 struct SyncStatus: Codable {
-    // Remove deviceId as it's not in the response
     let syncStatus: SyncTimes
     let lastSync: String?
     
     enum CodingKeys: String, CodingKey {
         case syncStatus = "sync_status"
         case lastSync = "last_sync"
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        syncStatus = try container.decode(SyncTimes.self, forKey: .syncStatus)
+        
+        // Handle null or missing lastSync
+        lastSync = try container.decodeIfPresent(String.self, forKey: .lastSync)
     }
 }
 
