@@ -4,6 +4,7 @@
 import Foundation
 import UIKit
 
+
 struct HealthMetrics: Codable {
     let heartRate: HeartRateData?
     let steps: StepData?
@@ -52,17 +53,20 @@ struct SleepData: Codable {
 struct SyncStatus: Codable {
     let syncStatus: SyncTimes
     let lastSync: String?
-    
+
     enum CodingKeys: String, CodingKey {
         case syncStatus = "sync_status"
         case lastSync = "last_sync"
     }
-    
+
+    // Add an explicit initializer to allow manual initialization
+    init(syncStatus: SyncTimes, lastSync: String?) {
+        self.syncStatus = syncStatus
+        self.lastSync = lastSync
+    }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         syncStatus = try container.decode(SyncTimes.self, forKey: .syncStatus)
-        
-        // Handle null or missing lastSync
         lastSync = try container.decodeIfPresent(String.self, forKey: .lastSync)
     }
 }
@@ -93,7 +97,14 @@ class NetworkManager {
             switch httpResponse.statusCode {
             case 404:
                 // If device not found, return empty sync status
-                return SyncStatus(syncStatus: SyncTimes(heartRate: nil, steps: nil, sleep: nil), lastSync: nil)
+                return SyncStatus(
+                    syncStatus: SyncTimes(
+                        heartRate: nil as String?,
+                        steps: nil as String?,
+                        sleep: nil as String?
+                    ),
+                    lastSync: nil as String?
+                )
             case 200..<300:
                 return try JSONDecoder().decode(SyncStatus.self, from: data)
             default:
