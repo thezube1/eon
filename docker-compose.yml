@@ -9,10 +9,12 @@ services:
       - "8000:8000"
     environment:
       - FLASK_APP=app.py
-      - FLASK_ENV=production
+      - FLASK_ENV=development
       - PORT=8000
+      - FLASK_DEBUG=1
     volumes:
       - ./server:/app
+      - /app/.cache
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/test"]

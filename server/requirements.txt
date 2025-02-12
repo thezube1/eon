@@ -3,3 +3,8 @@ flask-cors
 supabase
 python-dotenv
 gunicorn
+transformers
+torch
+torchvision
+torchaudio
+accelerate

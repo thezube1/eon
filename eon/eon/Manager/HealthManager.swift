@@ -98,25 +98,52 @@ class HealthManager: ObservableObject {
         healthStore.execute(query)
     }
 
-    private func fetchSleepHours() {
+    func fetchSleepHours() {
         guard let sleepType = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) else { return }
-        let now = Date()
-        let startOfDay = Calendar.current.startOfDay(for: now)
         
-        let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: now, options: .strictStartDate)
-        let query = HKSampleQuery(sampleType: sleepType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, results, _ in
+        // Calculate the time window for last night's sleep
+        let calendar = Calendar.current
+        let now = Date()
+        let startOfToday = calendar.startOfDay(for: now)
+        // Look back 12 hours from start of today to capture last night's sleep
+        let lastNightStart = calendar.date(byAdding: .hour, value: -12, to: startOfToday)!
+        
+        print("Fetching sleep data from \(lastNightStart) to \(now)")
+        
+        let predicate = HKQuery.predicateForSamples(withStart: lastNightStart, end: now, options: .strictStartDate)
+        let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+        
+        let query = HKSampleQuery(sampleType: sleepType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: [sortDescriptor]) { _, results, error in
+            if let error = error {
+                print("Error fetching sleep data: \(error)")
+                return
+            }
+            
             let totalSleep = results?
                 .compactMap { $0 as? HKCategorySample }
-                .filter { $0.value == HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue }
-                .reduce(0) { $0 + $1.endDate.timeIntervalSince($1.startDate) } ?? 0
+                .filter { sample in
+                    // Include all sleep stages that represent actual sleep
+                    let sleepStages: Set<Int> = [
+                        HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue,
+                        HKCategoryValueSleepAnalysis.asleepCore.rawValue,
+                        HKCategoryValueSleepAnalysis.asleepDeep.rawValue,
+                        HKCategoryValueSleepAnalysis.asleepREM.rawValue
+                    ]
+                    return sleepStages.contains(sample.value)
+                }
+                .reduce(0.0) { acc, sample in
+                    return acc + sample.endDate.timeIntervalSince(sample.startDate)
+                } ?? 0
             
             DispatchQueue.main.async {
                 self.sleepHours = totalSleep / 3600 // convert seconds to hours
+                print("Updated sleep hours: \(self.sleepHours)")
             }
         }
+        
         healthStore.execute(query)
     }
-    
+        
     // Add this function to your HealthManager class:
     func syncWithServer() async {
        do {
@@ -250,85 +277,91 @@ class HealthManager: ObservableObject {
        }
    }
    
-   private func fetchSleepDataSince(_ date: Date?) async -> [[String: Any]]? {
-       guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else {
-           print("Sleep type not available")
-           return nil
-       }
-       
-       // Look back 7 days if no date provided
-       let startDate = date ?? Calendar.current.date(byAdding: .day, value: -7, to: Date())!
-       let endDate = Date()
-       print("\nFetching sleep data from \(startDate) to \(endDate)")
-       
-       let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
-       let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
-       
-       return await withCheckedContinuation { continuation in
-           let query = HKSampleQuery(sampleType: sleepType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: [sortDescriptor]) { _, samples, error in
-               if let error = error {
-                   print("Error fetching sleep data: \(error)")
-                   continuation.resume(returning: nil ?? [])
-                   return
-               }
-               
-               print("Raw sleep samples count: \(samples?.count ?? 0)")
-               
-               let sleepData = samples?
-                   .compactMap { sample -> [String: Any]? in
-                       guard let categorySample = sample as? HKCategorySample else {
-                           print("Sample is not a category sample")
-                           return nil
-                       }
-                       
-                       func sleepStageDescription(for value: HKCategoryValueSleepAnalysis?) -> String {
-                           guard let value = value else { return "unknown" }
-                           switch value {
-                           case .inBed: return "In Bed"
-                           case .asleepUnspecified: return "Asleep (Unspecified)"
-                           case .awake: return "Awake"
-                           case .asleepCore: return "Asleep (Core)"
-                           case .asleepDeep: return "Asleep (Deep)"
-                           case .asleepREM: return "Asleep (REM)"
-                           @unknown default: return "Unknown Sleep Stage"
-                           }
-                       }
-                       
-                       let sleepValue = categorySample.value
-                       let valueType = HKCategoryValueSleepAnalysis(rawValue: sleepValue)
-                       print("Sleep sample - Start: \(categorySample.startDate)")
-                       print("             End: \(categorySample.endDate)")
-                       print("             Value: \(sleepStageDescription(for: valueType))")
-                       print("             Duration: \(categorySample.endDate.timeIntervalSince(categorySample.startDate) / 3600) hours")
-                       print("             Source: \(categorySample.sourceRevision.source.name)")
-                       
-                       if categorySample.value == HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue {
-                           return [
-                               "start_time": ISO8601DateFormatter().string(from: categorySample.startDate),
-                               "end_time": ISO8601DateFormatter().string(from: categorySample.endDate),
-                               "sleep_stage": "asleep",
-                               "source": categorySample.sourceRevision.source.name
-                           ]
-                       }
-                       return nil
-                   }
-               
-               if let sleepData = sleepData {
-                   print("\nProcessed sleep records: \(sleepData.count)")
-                   for (index, record) in sleepData.enumerated() {
-                       print("Record \(index + 1):")
-                       print("  Start: \(record["start_time"] as? String ?? "unknown")")
-                       print("  End: \(record["end_time"] as? String ?? "unknown")")
-                       print("  Stage: \(record["sleep_stage"] as? String ?? "unknown")")
-                       print("  Source: \(record["source"] as? String ?? "unknown")")
-                   }
-               }
-               
-               continuation.resume(returning: sleepData)
-           }
-           
-           healthStore.execute(query)
-       }
-   }
+    private func fetchSleepDataSince(_ date: Date?) async -> [[String: Any]]? {
+        guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else {
+            print("Sleep type not available")
+            return nil
+        }
+        
+        // Look back 7 days if no date provided
+        let startDate = date ?? Calendar.current.date(byAdding: .day, value: -7, to: Date())!
+        let endDate = Date()
+        print("\nFetching sleep data from \(startDate) to \(endDate)")
+        
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+        let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+        
+        return await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(sampleType: sleepType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: [sortDescriptor]) { _, samples, error in
+                if let error = error {
+                    print("Error fetching sleep data: \(error)")
+                    continuation.resume(returning: nil ?? [])
+                    return
+                }
+                
+                print("Raw sleep samples count: \(samples?.count ?? 0)")
+                
+                let sleepData = samples?
+                    .compactMap { sample -> [String: Any]? in
+                        guard let categorySample = sample as? HKCategorySample else {
+                            print("Sample is not a category sample")
+                            return nil
+                        }
+                        
+                        // Include all sleep stages that represent actual sleep
+                        let sleepStages: Set<Int> = [
+                            HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue,
+                            HKCategoryValueSleepAnalysis.asleepCore.rawValue,
+                            HKCategoryValueSleepAnalysis.asleepDeep.rawValue,
+                            HKCategoryValueSleepAnalysis.asleepREM.rawValue
+                        ]
+                        
+                        let sleepValue = categorySample.value
+                        let valueType = HKCategoryValueSleepAnalysis(rawValue: sleepValue)
+                        
+                        // Debug logging
+                        print("Sleep sample - Start: \(categorySample.startDate)")
+                        print("             End: \(categorySample.endDate)")
+                        print("             Value: \(valueType?.rawValue ?? -1)")
+                        print("             Duration: \(categorySample.endDate.timeIntervalSince(categorySample.startDate) / 3600) hours")
+                        print("             Source: \(categorySample.sourceRevision.source.name)")
+                        
+                        if sleepStages.contains(categorySample.value) {
+                            // Map the sleep stage to a string
+                            let sleepStageStr = switch valueType {
+                                case .asleepUnspecified: "unspecified"
+                                case .asleepCore: "core"
+                                case .asleepDeep: "deep"
+                                case .asleepREM: "rem"
+                                default: "unknown"
+                            }
+                            
+                            return [
+                                "start_time": ISO8601DateFormatter().string(from: categorySample.startDate),
+                                "end_time": ISO8601DateFormatter().string(from: categorySample.endDate),
+                                "sleep_stage": sleepStageStr,
+                                "source": categorySample.sourceRevision.source.name
+                            ]
+                        }
+                        return nil
+                    }
+                
+                if let sleepData = sleepData {
+                    print("\nProcessed sleep records: \(sleepData.count)")
+                    for (index, record) in sleepData.enumerated() {
+                        print("Record \(index + 1):")
+                        print("  Start: \(record["start_time"] as? String ?? "unknown")")
+                        print("  End: \(record["end_time"] as? String ?? "unknown")")
+                        print("  Stage: \(record["sleep_stage"] as? String ?? "unknown")")
+                        print("  Source: \(record["source"] as? String ?? "unknown")")
+                    }
+                }
+                
+                continuation.resume(returning: sleepData)
+            }
+            
+            healthStore.execute(query)
+        }
+    }
 
 }

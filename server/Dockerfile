@@ -27,5 +27,9 @@ ENV TIMEOUT=120
 # Expose the port the app runs on
 EXPOSE 8000
 
-# Command to run the application with Gunicorn
-CMD exec gunicorn --bind :$PORT --workers $WORKERS --timeout $TIMEOUT --access-logfile - --error-logfile - --log-level debug app:app 
+# Use different commands for development and production
+CMD if [ "$FLASK_ENV" = "development" ] ; then \
+        flask run --host=0.0.0.0 --port=$PORT --reload ; \
+    else \
+        exec gunicorn --bind :$PORT --workers $WORKERS --timeout $TIMEOUT --access-logfile - --error-logfile - --log-level debug app:app ; \
+    fi 

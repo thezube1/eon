@@ -2,12 +2,27 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 import os
 from routes.health import health_bp
+from routes.risk_analysis import risk_analysis_bp
+
+# Load environment variables before creating app
+from dotenv import load_dotenv
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
+# Configure Flask app
+debug_mode = os.environ.get('FLASK_ENV') == 'development'
+app.config.update(
+    DEBUG=debug_mode,
+    TEMPLATES_AUTO_RELOAD=True,
+    TIMEOUT=300,  # 5 minutes timeout
+    MAX_CONTENT_LENGTH=16 * 1024 * 1024  # 16MB max-limit
+)
+
 # Register blueprints
 app.register_blueprint(health_bp, url_prefix='/api/health')
+app.register_blueprint(risk_analysis_bp, url_prefix='/api')
 
 # Basic error handling
 @app.errorhandler(404)
