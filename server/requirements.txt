@@ -8,3 +8,5 @@ torch
 torchvision
 torchaudio
 accelerate
+requests>=2.31.0
+google-genai

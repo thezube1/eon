@@ -2,7 +2,18 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 import os
 from routes.health import health_bp
-from routes.risk_analysis import risk_analysis_bp
+from routes.risk_analysis import risk_analysis_bp, load_model
+import threading
+import logging
+
+# Configure logging to only show Flask logs
+logging.getLogger('werkzeug').setLevel(logging.INFO)
+logging.getLogger('httpcore').setLevel(logging.WARNING)
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('h2').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('supabase').setLevel(logging.WARNING)
+logging.getLogger('transformers').setLevel(logging.WARNING)
 
 # Load environment variables before creating app
 from dotenv import load_dotenv
@@ -19,6 +30,20 @@ app.config.update(
     TIMEOUT=300,  # 5 minutes timeout
     MAX_CONTENT_LENGTH=16 * 1024 * 1024  # 16MB max-limit
 )
+
+# Load ML model in a background thread during startup
+def load_model_on_startup():
+    with app.app_context():
+        try:
+            load_model()
+        except Exception as e:
+            app.logger.error(f"Failed to load model on startup: {e}")
+            # Don't raise the exception - let the server start anyway
+            # The risk analysis endpoint will return appropriate errors
+
+# Start model loading in background thread
+model_thread = threading.Thread(target=load_model_on_startup)
+model_thread.start()
 
 # Register blueprints
 app.register_blueprint(health_bp, url_prefix='/api/health')

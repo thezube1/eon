@@ -23,6 +23,7 @@ ENV FLASK_ENV=production
 ENV PORT=8000
 ENV WORKERS=2
 ENV TIMEOUT=120
+ENV GOOGLE_CLOUD_PROJECT=eon-health-450706
 
 # Expose the port the app runs on
 EXPOSE 8000
