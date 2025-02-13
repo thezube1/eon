@@ -363,5 +363,180 @@ class HealthManager: ObservableObject {
             healthStore.execute(query)
         }
     }
+    
+    func dailySegments(completion: @escaping ([HalfHourSegment]) -> Void) {
+        fetchTodaySleepSamples { sleepSamples in
+            self.fetchTodayStepsByHalfHour { stepsDict in
+                
+                let calendar = Calendar.current
+                guard let startOfDay = calendar.dateInterval(of: .day, for: Date())?.start else {
+                    completion([])
+                    return
+                }
+                
+                var segments: [HalfHourSegment] = []
+                for i in 0..<48 {
+                    guard
+                        let segmentStart = calendar.date(byAdding: .minute, value: i*30, to: startOfDay),
+                        let segmentEnd = calendar.date(byAdding: .minute, value: (i+1)*30, to: startOfDay)
+                    else {
+                        continue
+                    }
+                    
+                    // Determine the category for this block
+                    let cat = self.categoryForTimeBlock(
+                        start: segmentStart,
+                        end: segmentEnd,
+                        sleepSamples: sleepSamples,
+                        stepsDict: stepsDict
+                    )
+                    segments.append(HalfHourSegment(startTime: segmentStart, category: cat))
+                }
+                
+                completion(segments)
+            }
+        }
+    }
 
-}
+    // Example using the helpers from above
+    private func categoryForTimeBlock(start: Date,
+                                      end: Date,
+                                      sleepSamples: [HKCategorySample],
+                                      stepsDict: [Date: Double]) -> ActivityCategory {
+        if let majorStage = majoritySleepStage(start: start, end: end, samples: sleepSamples) {
+            switch majorStage {
+            case HKCategoryValueSleepAnalysis.asleepDeep.rawValue:
+                return .deepSleep
+            case HKCategoryValueSleepAnalysis.asleepREM.rawValue:
+                return .remSleep
+            default:
+                return .lightSleep
+            }
+        }
+        
+        let stepCountInBlock = stepsInBlock(start: start, end: end, stepsDict: stepsDict)
+        switch stepCountInBlock {
+        case _ where stepCountInBlock > 400: return .intense
+        case 200...400: return .moderate
+        case 50...199:  return .light
+        case 1...49:    return .veryLight
+        default:        return .inactive
+        }
+    }
+
+    private func majoritySleepStage(start: Date,
+                                    end: Date,
+                                    samples: [HKCategorySample]) -> Int? {
+        let blockDuration = end.timeIntervalSince(start)
+        let halfBlock = blockDuration / 2.0
+        
+        let relevant = samples.filter { $0.startDate < end && $0.endDate > start }
+        
+        var totalByStage: [Int: TimeInterval] = [:]
+        for sample in relevant {
+            let overlapStart = max(sample.startDate, start)
+            let overlapEnd = min(sample.endDate, end)
+            let overlap = overlapEnd.timeIntervalSince(overlapStart)
+            
+            guard overlap > 0 else { continue }
+            totalByStage[sample.value, default: 0] += overlap
+        }
+        
+        guard let (stage, duration) = totalByStage.max(by: { a, b in a.value < b.value }) else {
+            return nil
+        }
+        return (duration >= halfBlock) ? stage : nil
+    }
+
+    private func stepsInBlock(start: Date,
+                              end: Date,
+                              stepsDict: [Date: Double]) -> Double {
+        // If your dictionary keys match exactly with "start" times for each 30 min block:
+        if let steps = stepsDict[start] {
+            return steps
+        }
+        return 0
+    }
+
+    /// Fetch today's raw Sleep category samples
+        func fetchTodaySleepSamples(completion: @escaping ([HKCategorySample]) -> Void) {
+            guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else {
+                print("Sleep type not available")
+                completion([])
+                return
+            }
+            
+            let calendar = Calendar.current
+            let now = Date()
+            guard let startOfDay = calendar.dateInterval(of: .day, for: now)?.start else {
+                completion([])
+                return
+            }
+            
+            let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: now, options: .strictStartDate)
+            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+            
+            let query = HKSampleQuery(sampleType: sleepType,
+                                      predicate: predicate,
+                                      limit: HKObjectQueryNoLimit,
+                                      sortDescriptors: [sortDescriptor]) { _, samples, error in
+                if let error = error {
+                    print("Error fetching today's sleep samples: \(error)")
+                    completion([])
+                    return
+                }
+                
+                let sleepSamples = (samples as? [HKCategorySample]) ?? []
+                completion(sleepSamples)
+            }
+            healthStore.execute(query)
+        }
+
+        /// Fetch step counts in 30-minute chunks for today
+        func fetchTodayStepsByHalfHour(completion: @escaping ([Date: Double]) -> Void) {
+            guard let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount) else {
+                completion([:])
+                return
+            }
+            
+            let now = Date()
+            guard let startOfDay = Calendar.current.dateInterval(of: .day, for: now)?.start else {
+                completion([:])
+                return
+            }
+
+            // We'll collect step totals in a dictionary keyed by each 30-min chunk start
+            var interval = DateComponents()
+            interval.minute = 30
+
+            let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: now, options: .strictStartDate)
+            
+            let query = HKStatisticsCollectionQuery(
+                quantityType: stepType,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum,
+                anchorDate: startOfDay,
+                intervalComponents: interval
+            )
+            
+            query.initialResultsHandler = { _, results, error in
+                guard let statsCollection = results, error == nil else {
+                    completion([:])
+                    return
+                }
+                
+                var stepsDict: [Date: Double] = [:]
+                statsCollection.enumerateStatistics(from: startOfDay, to: now) { stats, _ in
+                    if let quantity = stats.sumQuantity() {
+                        let stepCount = quantity.doubleValue(for: HKUnit.count())
+                        // stats.startDate is the beginning of this 30-min bucket
+                        stepsDict[stats.startDate] = stepCount
+                    }
+                }
+                
+                completion(stepsDict)
+            }
+            healthStore.execute(query)
+        }
+    }
+
