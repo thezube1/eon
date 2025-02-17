@@ -102,12 +102,12 @@ struct UserNotesResponse: Codable {
 
 class NetworkManager {
     static let shared = NetworkManager()
-    private let baseURL = "https://eon-758648273902.us-west1.run.app/api/health" // e.g., "http://your-api-domain.com"
+    private let baseURL = "https://eon-758648273902.us-west1.run.app/api" // Changed from /api/health to /api
     
     private init() {}
     
     func getSyncStatus(deviceId: String) async throws -> SyncStatus {
-        let url = URL(string: "\(baseURL)/devices/\(deviceId)/sync-status")!
+        let url = URL(string: "\(baseURL)/health/devices/\(deviceId)/sync-status")!
         let (data, response) = try await URLSession.shared.data(from: url)
         
         if let httpResponse = response as? HTTPURLResponse {
@@ -132,14 +132,14 @@ class NetworkManager {
     }
     
     func getLatestMetrics(deviceId: String) async throws -> HealthMetrics {
-        let url = URL(string: "\(baseURL)/devices/\(deviceId)/latest")!
+        let url = URL(string: "\(baseURL)/health/devices/\(deviceId)/latest")!
         let (data, _) = try await URLSession.shared.data(from: url)
         return try JSONDecoder().decode(HealthMetrics.self, from: data)
     }
     
     func syncHealthData(deviceId: String, healthData: [String: Any]) async throws {
-        print("Attempting to sync health data to URL: \(baseURL)/sync")
-        let url = URL(string: "\(baseURL)/sync")!
+        print("Attempting to sync health data to URL: \(baseURL)/health/sync")
+        let url = URL(string: "\(baseURL)/health/sync")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

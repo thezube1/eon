@@ -1,5 +1,12 @@
 import SwiftUI
 
+// Helper extension to safely access array elements
+extension Array {
+    subscript(safe index: Int) -> Element? {
+        return indices.contains(index) ? self[index] : nil
+    }
+}
+
 // 1) The data model for notes
 struct UserNote: Identifiable {
     let id: Int
@@ -13,9 +20,17 @@ struct UserNote: Identifiable {
     }
     
     init?(from response: UserNoteResponse) {
-        guard let date = ISO8601DateFormatter().date(from: response.createdAt) else {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [
+            .withInternetDateTime,
+            .withFractionalSeconds
+        ]
+        
+        guard let date = formatter.date(from: response.createdAt) else {
+            print("Failed to parse date: \(response.createdAt)")
             return nil
         }
+        
         self.id = response.id
         self.timestamp = date
         self.content = response.note
@@ -23,11 +38,10 @@ struct UserNote: Identifiable {
 }
 
 struct TodayView: View {
-    
     @EnvironmentObject var healthManager: HealthManager
-
+    
     // Tab selection
-        @State private var selectedTab = 0
+    @State private var selectedTab = 0
     
     // Existing states you might already have
     @State private var currentTime = Date()
@@ -39,201 +53,58 @@ struct TodayView: View {
     @State private var showNoteOverlay = false           // Toggle the overlay
     @State private var editingNote: UserNote? = nil      // Which note are we editing?
     @State private var noteText: String = ""             // The text in the overlay
-
+    @FocusState private var isNoteFieldFocused: Bool    // For keyboard focus
+    @State private var showConfirmation = false         // For confirmation modal
+    @State private var selectedTime: Date? = nil // Changed to optional to track if user has selected a time
+    @State private var isDragging: Bool = false
+    
+    // Timer for refreshing notes
+    private let notesRefreshTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
+    
     var body: some View {
-            // 1) A TabView with three tabs
-            TabView(selection: $selectedTab) {
-                
-                // --- TAB 1: Today ---
-                mainContent
-                    .tag(0)
-                    .tabItem {
-                        Image(systemName: "sun.max.fill")
-                        Text("Today")
-                    }
-                
-                // --- TAB 2: Recs (placeholder) ---
-                Text("Recs View")
-                    .tag(1)
-                    .tabItem {
-                        Image(systemName: "list.bullet.rectangle")
-                        Text("Recs")
-                    }
-                
-                // --- TAB 3: Stats (placeholder) ---
-                Text("Stats View")
-                    .tag(2)
-                    .tabItem {
-                        Image(systemName: "chart.bar.xaxis")
-                        Text("Stats")
-                    }
+        TabView(selection: $selectedTab) {
+            mainContent
+                .tag(0)
+                .tabItem {
+                    Image(systemName: "sun.max.fill")
+                    Text("Today")
+                }
+            
+            Text("Recs View")
+                .tag(1)
+                .tabItem {
+                    Image(systemName: "list.bullet.rectangle")
+                    Text("Recs")
+                }
+            
+            Text("Stats View")
+                .tag(2)
+                .tabItem {
+                    Image(systemName: "chart.bar.xaxis")
+                    Text("Stats")
+                }
+        }
+        .onAppear {
+            print("TodayView appeared - Starting data load")
+            healthManager.dailySegments { newSegments in
+                self.segments = newSegments
             }
-            // 2) On appear, fetch your data as usual
-            .onAppear {
-                healthManager.dailySegments { newSegments in
-                    self.segments = newSegments
-                }
-                startTimer()
-                
-                // Load notes
-                Task {
-                    await loadNotes()
-                }
+            startTimer()
+            
+            // Initial notes load
+            Task {
+                print("Starting initial loadNotes() task")
+                await loadNotes()
             }
         }
-        
-        // MARK: - The bulk of your old "main layout" code
-        private var mainContent: some View {
-            ZStack {
-                VStack {
-                    // Top bar
-                    HStack {
-                        Button {
-                            // profile
-                        } label: {
-                            Image(systemName: "person.crop.circle")
-                                .font(.title)
-                        }
-                        Spacer()
-                        Button {
-                            // search
-                        } label: {
-                            Image(systemName: "magnifyingglass")
-                                .font(.title)
-                        }
-                    }
-                    .padding(.horizontal)
-                    .padding(.top, 8)
-                    
-                    // Greeting or tapped category text
-                    Text(
-                        selectedCategory == nil
-                        ? "\(greeting(for: currentTime)), Ashwin"
-                        : descriptiveString(for: selectedCategory!)
-                    )
-                    .font(.largeTitle)
-                    .bold()
-                    .padding(.vertical, 8)
-                    
-                    // Spacer above the bar (optional)
-                    Spacer()
-                    
-                    // Health bar geometry
-                    GeometryReader { geo in
-                        ZStack(alignment: .top) {
-                            
-                            // 48 segments, clipped corners, etc.
-                            VStack(spacing: 0) {
-                                ForEach(0..<segments.count, id: \.self) { i in
-                                    let segment = segments[i]
-                                    Rectangle()
-                                        .fill(segment.category.color())
-                                        .frame(height: min(geo.size.height, 480) / 48)
-                                        .onTapGesture {
-                                            selectedCategory = segment.category
-                                        }
-                                }
-                            }
-                            .frame(width: min(geo.size.width, 250),
-                                   height: min(geo.size.height, 480))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                            
-                            // The black line indicator for current time
-                            let progress = dayProgress(for: currentTime)
-                            let indicatorY = progress * min(geo.size.height, 480)
-                            
-                            Capsule()
-                                .fill(Color(hex: "#393938"))
-                                .frame(width: min(geo.size.width, 250) + 20, height: 3)
-                                .offset(x: 0, y: indicatorY - 1.5)
-                            
-                            // Note indicators
-                            let calendar = Calendar.current
-                            let today = calendar.startOfDay(for: Date())
-                            let todayNotes = userNotes.filter { calendar.startOfDay(for: $0.timestamp) == today }
-                            
-                            ForEach(todayNotes) { note in
-                                let noteProgress = dayProgress(for: note.timestamp)
-                                let noteY = noteProgress * min(geo.size.height, 480)
-                                
-                                Capsule()
-                                    .fill(Color.black)
-                                    .frame(width: min(geo.size.width, 250) + 20, height: 2)
-                                    .offset(x: 0, y: noteY - 1)
-                                    .onTapGesture {
-                                        editingNote = note
-                                        noteText = note.content
-                                        showNoteOverlay = true
-                                    }
-                            }
-                            
-                            // The plus button near the right side
-                            Button {
-                                editingNote = UserNote(id: -1, timestamp: Date(), content: "")
-                                noteText = ""
-                                showNoteOverlay = true
-                            } label: {
-                                Image(systemName: "plus.circle")
-                                    .font(.title)
-                                    .foregroundColor(.black)
-                            }
-                            .offset(x: min(geo.size.width, 250)/2 + 35,
-                                    y: indicatorY - 16)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    }
-                    .frame(height: 500)
-                    .padding(.horizontal)
-                    
-                    Spacer()
-                }
-                
-                // Note overlay
-                if showNoteOverlay {
-                    // Dim background
-                    Color.black.opacity(0.3)
-                        .ignoresSafeArea()
-                        .onTapGesture {
-                            // Possibly close overlay on background tap
-                        }
-                    
-                    VStack(alignment: .leading, spacing: 8) {
-                        TextEditor(text: $noteText)
-                            .frame(minHeight: 60, maxHeight: 120)
-                            .cornerRadius(8)
-                            .padding(8)
-                            .background(Color.white)
-                        
-                        HStack {
-                            Button {
-                                deleteNote()
-                            } label: {
-                                Image(systemName: "trash")
-                                    .font(.title2)
-                                    .foregroundColor(.red)
-                            }
-                            
-                            Spacer()
-                            
-                            Button {
-                                saveNote()
-                            } label: {
-                                Image(systemName: "checkmark.circle")
-                                    .font(.title2)
-                                    .foregroundColor(.green)
-                            }
-                        }
-                        .padding(.horizontal, 8)
-                    }
-                    .frame(width: 250)
-                    .padding()
-                    .background(Color.white)
-                    .cornerRadius(10)
-                    .shadow(radius: 5)
-                }
+        .onReceive(notesRefreshTimer) { _ in
+            print("Timer triggered - refreshing notes")
+            Task {
+                await loadNotes()
             }
         }
-
+    }
+    
     // MARK: - Timer stuff
     func startTimer() {
         Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
@@ -291,40 +162,56 @@ struct TodayView: View {
                 // Refresh notes from server
                 await loadNotes()
                 
-                // Reset overlay state
-                editingNote = nil
-                noteText = ""
-                showNoteOverlay = false
+                // Reset overlay state and show confirmation
+                DispatchQueue.main.async {
+                    showNoteOverlay = false
+                    editingNote = nil
+                    noteText = ""
+                    showConfirmation = true
+                    
+                    // Dismiss confirmation after 3 seconds
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                        withAnimation {
+                            showConfirmation = false
+                        }
+                    }
+                }
                 
             } catch {
                 print("Error saving note: \(error)")
-                // You might want to show an error alert to the user here
             }
         }
     }
     
     func loadNotes() async {
+        print("loadNotes() function called")
         do {
             // Get the device ID
             guard let deviceId = UIDevice.current.identifierForVendor?.uuidString else {
                 print("No device ID available")
                 return
             }
+            print("Attempting to load notes for device: \(deviceId)")
             
             // Load notes from server
             let noteResponses = try await NetworkManager.shared.getNotes(deviceId: deviceId)
+            print("Received \(noteResponses.count) notes from server")
             
             // Convert to UserNote objects
             let notes = noteResponses.compactMap { UserNote(from: $0) }
+            print("Converted \(notes.count) valid notes")
             
             // Update the @State variable on the main thread
             DispatchQueue.main.async {
                 self.userNotes = notes
+                print("Updated userNotes array with \(notes.count) notes")
             }
             
         } catch {
             print("Error loading notes: \(error)")
-            // You might want to show an error alert to the user here
+            if let networkError = error as? NetworkError {
+                print("Network error details: \(networkError)")
+            }
         }
     }
     
@@ -337,6 +224,293 @@ struct TodayView: View {
         noteText = ""
         showNoteOverlay = false
     }
+    
+    // Update the updateSelectedTime function to handle clicks better
+    private func updateSelectedTime(_ y: CGFloat, in geometry: GeometryProxy) {
+        let maxHeight = min(geometry.size.height * 0.9, geometry.size.height - 40)
+        let progress = max(0, min(1, y / maxHeight))
+        let calendar = Calendar.current
+        guard let startOfDay = calendar.dateInterval(of: .day, for: Date())?.start else { return }
+        let secondsInDay: TimeInterval = 24 * 60 * 60
+        let selectedSeconds = secondsInDay * Double(progress)
+        let newSelectedTime = startOfDay.addingTimeInterval(selectedSeconds)
+        
+        // Update on main thread to avoid UI warnings
+        DispatchQueue.main.async {
+            selectedTime = newSelectedTime
+            // Update selected category based on the time
+            if let segment = segments[safe: Int(progress * 48)] {
+                selectedCategory = segment.category
+            }
+        }
+    }
+    
+    // New helper function to format time string
+    private func timeString(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return formatter.string(from: date)
+    }
+    
+    // MARK: - Main Content View
+    private var mainContent: some View {
+        GeometryReader { screenGeo in
+            VStack {
+                Spacer()
+                Spacer()
+                
+                // Greeting or tapped category text
+                Text(
+                    selectedCategory == nil
+                    ? "\(greeting(for: currentTime))"
+                    : descriptiveString(for: selectedCategory!)
+                )
+                .font(.largeTitle)
+                .bold()
+                
+                // Time display below greeting
+                HStack(spacing: 12) {
+                    Text(timeString(for: selectedTime ?? currentTime))
+                        .font(.title2)
+                        .foregroundColor(.gray)
+                        .animation(.easeInOut, value: selectedTime)
+                    
+                    // Reset button appears when a time is selected
+                    if selectedTime != nil {
+                        Button(action: {
+                            withAnimation {
+                                selectedTime = nil
+                                selectedCategory = nil
+                            }
+                        }) {
+                            Text("Reset")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(
+                                    Capsule()
+                                        .fill(Color.black)
+                                        .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+                                )
+                        }
+                        .transition(.opacity.combined(with: .scale))
+                    }
+                }
+                
+                Spacer()
+                
+                // Health bar geometry
+                GeometryReader { mainGeo in
+                    ZStack(alignment: .top) {
+                        // 48 segments, clipped corners, etc.
+                        VStack(spacing: 0) {
+                            ForEach(0..<segments.count, id: \.self) { i in
+                                let segment = segments[i]
+                                Rectangle()
+                                    .fill(segment.category.color())
+                                    .frame(height: min(mainGeo.size.height * 0.9, mainGeo.size.height - 40) / 48)
+                            }
+                        }
+                        .frame(width: min(mainGeo.size.width, 250),
+                               height: min(mainGeo.size.height * 0.9, mainGeo.size.height - 40))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    isDragging = true
+                                    let localY = value.location.y
+                                    updateSelectedTime(localY, in: mainGeo)
+                                }
+                                .onEnded { value in
+                                    isDragging = false
+                                    let localY = value.location.y
+                                    updateSelectedTime(localY, in: mainGeo)
+                                }
+                        )
+                        
+                        // The black line indicator for current time
+                        let progress = (selectedTime != nil) ? dayProgress(for: selectedTime!) : dayProgress(for: currentTime)
+                        let indicatorY = progress * min(mainGeo.size.height * 0.9, mainGeo.size.height - 40)
+                        
+                        // Timeline bar
+                        Capsule()
+                            .fill(Color(hex: "#393938"))
+                            .frame(width: min(mainGeo.size.width, 250) + 20, height: 3)
+                            .offset(x: 0, y: indicatorY - 1.5)
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { value in
+                                        isDragging = true
+                                        let localY = value.location.y
+                                        updateSelectedTime(localY, in: mainGeo)
+                                    }
+                                    .onEnded { value in
+                                        isDragging = false
+                                        let localY = value.location.y
+                                        updateSelectedTime(localY, in: mainGeo)
+                                    }
+                            )
+                        
+                        // Note indicators
+                        let calendar = Calendar.current
+                        let today = calendar.startOfDay(for: Date())
+                        let todayNotes = userNotes.filter { calendar.startOfDay(for: $0.timestamp) == today }
+                            .sorted { $0.timestamp < $1.timestamp }
+                        
+                        // First draw all lines (they'll be in the back)
+                        ForEach(todayNotes) { note in
+                            let noteProgress = dayProgress(for: note.timestamp)
+                            let noteY = noteProgress * min(mainGeo.size.height * 0.9, mainGeo.size.height - 40)
+                            
+                            // Horizontal line
+                            Capsule()
+                                .fill(Color.black.opacity(0.2))
+                                .frame(width: min(mainGeo.size.width, 250) + 20, height: 2)
+                                .offset(x: 0, y: noteY - 1)
+                                .zIndex(1)
+                        }
+                        
+                        // Then draw all circles (they'll be in front)
+                        ForEach(todayNotes) { note in
+                            let noteProgress = dayProgress(for: note.timestamp)
+                            let noteY = noteProgress * min(mainGeo.size.height * 0.9, mainGeo.size.height - 40)
+                            
+                            // Circle with note icon
+                            Circle()
+                                .fill(Color.black)
+                                .frame(width: 24, height: 24)
+                                .overlay(
+                                    ZStack {
+                                        Circle()
+                                            .stroke(Color.white, lineWidth: 2)
+                                        Image(systemName: "note.text")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.white)
+                                    }
+                                )
+                                .offset(x: -((min(mainGeo.size.width, 250) + 20) / 2) - 15, y: noteY - 12)
+                                .zIndex(Double(note.timestamp.timeIntervalSince1970))
+                                .onTapGesture {
+                                    editingNote = note
+                                    noteText = note.content
+                                    showNoteOverlay = true
+                                }
+                        }
+                        
+                        // The plus button near the right side
+                        Button {
+                            editingNote = UserNote(id: -1, timestamp: Date(), content: "")
+                            noteText = ""
+                            showNoteOverlay = true
+                        } label: {
+                            Image(systemName: "plus.circle")
+                                .font(.title)
+                                .foregroundColor(.black)
+                        }
+                        .offset(x: min(mainGeo.size.width, 250)/2 + 35,
+                                y: indicatorY - 16)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                }
+                .frame(height: screenGeo.size.height * 0.85)
+                .padding(.horizontal)
+                
+                Spacer()
+                Spacer()
+            }
+            .overlay {
+                if showNoteOverlay {
+                    // Dim background
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            showNoteOverlay = false
+                        }
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("How are you feeling?")
+                            .font(.headline)
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 8)
+                            .padding(.top, 8)
+                        
+                        TextEditor(text: $noteText)
+                            .frame(minHeight: 60, maxHeight: 120)
+                            .cornerRadius(8)
+                            .padding(8)
+                            .background(Color.white)
+                            .focused($isNoteFieldFocused)
+                        
+                        HStack {
+                            if editingNote?.id != -1 {
+                                Button {
+                                    deleteNote()
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.title2)
+                                        .foregroundColor(.red)
+                                }
+                            }
+                            
+                            Spacer()
+                            
+                            // Cancel button
+                            Button {
+                                showNoteOverlay = false
+                            } label: {
+                                Text("Cancel")
+                                    .foregroundColor(.gray)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                            }
+                            
+                            // Submit button
+                            Button {
+                                saveNote()
+                            } label: {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 32))
+                                    .foregroundColor(.green)
+                                    .padding(.horizontal, 4)
+                            }
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 8)
+                    }
+                    .frame(width: 250)
+                    .background(Color.white)
+                    .cornerRadius(10)
+                    .shadow(radius: 5)
+                    .onAppear {
+                        isNoteFieldFocused = true
+                    }
+                }
+                
+                if showConfirmation {
+                    VStack {
+                        Text("Thanks for checking in!")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .padding()
+                            .background(
+                                Capsule()
+                                    .fill(Color.black)
+                                    .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+                            )
+                    }
+                    .transition(.opacity.combined(with: .scale))
+                    .animation(.easeInOut, value: showConfirmation)
+                }
+            }
+        }
+    }
 }
 
-struct TodayView_Previews: PreviewProvider { static var previews: some View { TodayView() .environmentObject(HealthManager()) } }
+struct TodayView_Previews: PreviewProvider {
+    static var previews: some View {
+        TodayView()
+            .environmentObject(HealthManager())
+    }
+}
