@@ -442,9 +442,19 @@ class HealthManager: ObservableObject {
             totalByStage[sample.value, default: 0] += overlap
         }
         
+        // Debug prints
+            print("Time Block: \(start) - \(end)")
+            for (stageValue, totalTime) in totalByStage {
+                print("  Stage \(stageValue) overlap: \(totalTime / 60) minutes")
+            }
+        
         guard let (stage, duration) = totalByStage.max(by: { a, b in a.value < b.value }) else {
             return nil
         }
+        
+        // Also print the chosen stage
+            print("  => majority stage: \(stage) with \(duration / 60) minutes")
+        
         return (duration >= halfBlock) ? stage : nil
     }
 
