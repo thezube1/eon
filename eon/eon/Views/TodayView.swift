@@ -125,7 +125,7 @@ struct TodayView: View {
                             Capsule()
                                 .fill(Color(hex: "#393938"))
                                 .frame(width: min(geo.size.width, 250) + 20, height: 3)
-                                .offset(x: -10, y: indicatorY - 1.5)
+                                .offset(x: 0, y: indicatorY - 1.5)
                             
                             // Circles for notes
                             ForEach(userNotes) { note in
@@ -135,7 +135,7 @@ struct TodayView: View {
                                 Circle()
                                     .fill(Color(hex: "#393938"))
                                     .frame(width: 10, height: 10)
-                                    .offset(x: -165, y: circleY - 5)
+                                    .offset(x: -160, y: circleY - 5)
                                     .onTapGesture {
                                         editingNote = note
                                         noteText = note.content
@@ -153,7 +153,7 @@ struct TodayView: View {
                                     .font(.title)
                                     .foregroundColor(.black)
                             }
-                            .offset(x: min(geo.size.width, 250)/2 + 30,
+                            .offset(x: min(geo.size.width, 250)/2 + 35,
                                     y: indicatorY - 16)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
