@@ -4,8 +4,7 @@ import json
 import logging
 import sys
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Simple logger without custom configuration
 logger = logging.getLogger(__name__)
 
 def format_predictions(data: dict) -> dict:

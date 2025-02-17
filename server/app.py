@@ -3,17 +3,13 @@ from flask_cors import CORS
 import os
 from routes.health import health_bp
 from routes.risk_analysis import risk_analysis_bp, load_model
+from routes.notes import notes_bp
 import threading
 import logging
 
-# Configure logging to only show Flask logs
-logging.getLogger('werkzeug').setLevel(logging.INFO)
-logging.getLogger('httpcore').setLevel(logging.WARNING)
-logging.getLogger('httpx').setLevel(logging.WARNING)
-logging.getLogger('h2').setLevel(logging.WARNING)
-logging.getLogger('urllib3').setLevel(logging.WARNING)
-logging.getLogger('supabase').setLevel(logging.WARNING)
-logging.getLogger('transformers').setLevel(logging.WARNING)
+# Configure logging to only show Flask logs and suppress all others
+logging.basicConfig(level=logging.WARNING)  # Set global logging to WARNING
+logging.getLogger('werkzeug').setLevel(logging.INFO)  # Only show Flask's access logs
 
 # Load environment variables before creating app
 from dotenv import load_dotenv
@@ -48,6 +44,7 @@ model_thread.start()
 # Register blueprints
 app.register_blueprint(health_bp, url_prefix='/api/health')
 app.register_blueprint(risk_analysis_bp, url_prefix='/api')
+app.register_blueprint(notes_bp, url_prefix='/api/notes')
 
 # Basic error handling
 @app.errorhandler(404)

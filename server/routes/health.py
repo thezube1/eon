@@ -6,12 +6,7 @@ from supabase import create_client, Client
 import logging
 import sys
 
-# Configure logging to output to stdout for Cloud Run
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
+# Simple logger without custom configuration
 logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file if it exists

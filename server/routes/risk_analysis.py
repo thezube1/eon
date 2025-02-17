@@ -16,21 +16,7 @@ from utils.format_metrics import format_metrics
 from utils.soap_generator import generate_soap_note
 from utils.format_predictions import format_predictions
 
-# Configure logging - suppress unnecessary logs
-logging.basicConfig(level=logging.INFO)
-
-# Set log levels for noisy libraries
-logging.getLogger('werkzeug').setLevel(logging.WARNING)  # Flask's default logger
-logging.getLogger('httpcore').setLevel(logging.WARNING)  # HTTP client
-logging.getLogger('httpx').setLevel(logging.WARNING)     # HTTP client
-logging.getLogger('h2').setLevel(logging.WARNING)        # HTTP/2
-logging.getLogger('urllib3').setLevel(logging.WARNING)   # URL lib
-logging.getLogger('supabase').setLevel(logging.WARNING)  # Supabase
-logging.getLogger('google').setLevel(logging.WARNING)    # Google API
-logging.getLogger('transformers').setLevel(logging.WARNING)  # Hugging Face
-logging.getLogger('torch').setLevel(logging.WARNING)     # PyTorch
-logging.getLogger('requests').setLevel(logging.WARNING)  # Requests
-
+# Simple logger without custom configuration
 logger = logging.getLogger(__name__)
 
 # Global variables for model management

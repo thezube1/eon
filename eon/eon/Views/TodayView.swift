@@ -2,9 +2,24 @@ import SwiftUI
 
 // 1) The data model for notes
 struct UserNote: Identifiable {
-    let id = UUID()
+    let id: Int
     var timestamp: Date
     var content: String
+    
+    init(id: Int = -1, timestamp: Date = Date(), content: String) {
+        self.id = id
+        self.timestamp = timestamp
+        self.content = content
+    }
+    
+    init?(from response: UserNoteResponse) {
+        guard let date = ISO8601DateFormatter().date(from: response.createdAt) else {
+            return nil
+        }
+        self.id = response.id
+        self.timestamp = date
+        self.content = response.note
+    }
 }
 
 struct TodayView: View {
@@ -59,6 +74,11 @@ struct TodayView: View {
                     self.segments = newSegments
                 }
                 startTimer()
+                
+                // Load notes
+                Task {
+                    await loadNotes()
+                }
             }
         }
         
@@ -118,7 +138,7 @@ struct TodayView: View {
                                    height: min(geo.size.height, 480))
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                             
-                            // The black line indicator
+                            // The black line indicator for current time
                             let progress = dayProgress(for: currentTime)
                             let indicatorY = progress * min(geo.size.height, 480)
                             
@@ -127,15 +147,19 @@ struct TodayView: View {
                                 .frame(width: min(geo.size.width, 250) + 20, height: 3)
                                 .offset(x: 0, y: indicatorY - 1.5)
                             
-                            // Circles for notes
-                            ForEach(userNotes) { note in
+                            // Note indicators
+                            let calendar = Calendar.current
+                            let today = calendar.startOfDay(for: Date())
+                            let todayNotes = userNotes.filter { calendar.startOfDay(for: $0.timestamp) == today }
+                            
+                            ForEach(todayNotes) { note in
                                 let noteProgress = dayProgress(for: note.timestamp)
-                                let circleY = noteProgress * min(geo.size.height, 480)
+                                let noteY = noteProgress * min(geo.size.height, 480)
                                 
-                                Circle()
-                                    .fill(Color(hex: "#393938"))
-                                    .frame(width: 10, height: 10)
-                                    .offset(x: -160, y: circleY - 5)
+                                Capsule()
+                                    .fill(Color.black)
+                                    .frame(width: min(geo.size.width, 250) + 20, height: 2)
+                                    .offset(x: 0, y: noteY - 1)
                                     .onTapGesture {
                                         editingNote = note
                                         noteText = note.content
@@ -145,7 +169,7 @@ struct TodayView: View {
                             
                             // The plus button near the right side
                             Button {
-                                editingNote = UserNote(timestamp: Date(), content: "")
+                                editingNote = UserNote(id: -1, timestamp: Date(), content: "")
                                 noteText = ""
                                 showNoteOverlay = true
                             } label: {
@@ -253,23 +277,55 @@ struct TodayView: View {
     
     // MARK: - Saving / Deleting Notes
     func saveNote() {
-        guard var note = editingNote else { return }
-        // Update the note's content
-        note.content = noteText
-        note.timestamp = Date()  // If you want to "update" the timestamp each time.
-        
-        // If it's a brand new note (not in array), append; else update
-        if let index = userNotes.firstIndex(where: { $0.id == note.id }) {
-            // Update existing
-            userNotes[index] = note
-        } else {
-            // Insert new
-            userNotes.append(note)
+        Task {
+            do {
+                // Get the device ID
+                guard let deviceId = UIDevice.current.identifierForVendor?.uuidString else {
+                    print("No device ID available")
+                    return
+                }
+                
+                // Save the note to the server
+                try await NetworkManager.shared.createNote(deviceId: deviceId, note: noteText)
+                
+                // Refresh notes from server
+                await loadNotes()
+                
+                // Reset overlay state
+                editingNote = nil
+                noteText = ""
+                showNoteOverlay = false
+                
+            } catch {
+                print("Error saving note: \(error)")
+                // You might want to show an error alert to the user here
+            }
         }
-        // Reset overlay state
-        editingNote = nil
-        noteText = ""
-        showNoteOverlay = false
+    }
+    
+    func loadNotes() async {
+        do {
+            // Get the device ID
+            guard let deviceId = UIDevice.current.identifierForVendor?.uuidString else {
+                print("No device ID available")
+                return
+            }
+            
+            // Load notes from server
+            let noteResponses = try await NetworkManager.shared.getNotes(deviceId: deviceId)
+            
+            // Convert to UserNote objects
+            let notes = noteResponses.compactMap { UserNote(from: $0) }
+            
+            // Update the @State variable on the main thread
+            DispatchQueue.main.async {
+                self.userNotes = notes
+            }
+            
+        } catch {
+            print("Error loading notes: \(error)")
+            // You might want to show an error alert to the user here
+        }
     }
     
     func deleteNote() {

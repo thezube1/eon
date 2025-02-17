@@ -3,16 +3,7 @@ import logging
 import sys
 from supabase import create_client
 
-# Configure logging - suppress unnecessary logs
-logging.basicConfig(level=logging.INFO)
-
-# Set log levels for noisy libraries
-logging.getLogger('httpcore').setLevel(logging.WARNING)
-logging.getLogger('httpx').setLevel(logging.WARNING)
-logging.getLogger('h2').setLevel(logging.WARNING)
-logging.getLogger('urllib3').setLevel(logging.WARNING)
-logging.getLogger('supabase').setLevel(logging.WARNING)
-
+# Simple logger without custom configuration
 logger = logging.getLogger(__name__)
 
 def init_supabase():

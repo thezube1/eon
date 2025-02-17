@@ -4,7 +4,6 @@
 import Foundation
 import UIKit
 
-
 struct HealthMetrics: Codable {
     let heartRate: HeartRateData?
     let steps: StepData?
@@ -83,6 +82,24 @@ struct SyncTimes: Codable {
     }
 }
 
+struct UserNoteResponse: Codable {
+    let id: Int
+    let deviceId: Int
+    let note: String
+    let createdAt: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case deviceId = "device_id"
+        case note
+        case createdAt = "created_at"
+    }
+}
+
+struct UserNotesResponse: Codable {
+    let notes: [UserNoteResponse]
+}
+
 class NetworkManager {
     static let shared = NetworkManager()
     private let baseURL = "https://eon-758648273902.us-west1.run.app/api/health" // e.g., "http://your-api-domain.com"
@@ -150,6 +167,44 @@ class NetworkManager {
             }
             throw NetworkError.serverError(statusCode: httpResponse.statusCode)
         }
+    }
+    
+    func createNote(deviceId: String, note: String) async throws {
+        let url = URL(string: "\(baseURL)/notes/devices/\(deviceId)/notes")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let noteData = ["note": note]
+        request.httpBody = try JSONSerialization.data(withJSONObject: noteData)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NetworkError.invalidResponse
+        }
+        
+        if !(200...299).contains(httpResponse.statusCode) {
+            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                print("Server error response: \(errorJson)")
+            }
+            throw NetworkError.serverError(statusCode: httpResponse.statusCode)
+        }
+    }
+    
+    func getNotes(deviceId: String) async throws -> [UserNoteResponse] {
+        let url = URL(string: "\(baseURL)/notes/devices/\(deviceId)/notes")!
+        let (data, response) = try await URLSession.shared.data(from: url)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NetworkError.invalidResponse
+        }
+        
+        if !(200...299).contains(httpResponse.statusCode) {
+            throw NetworkError.serverError(statusCode: httpResponse.statusCode)
+        }
+        
+        let notesResponse = try JSONDecoder().decode(UserNotesResponse.self, from: data)
+        return notesResponse.notes
     }
 }
 

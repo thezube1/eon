@@ -3,7 +3,7 @@ from typing import Dict, List, Any
 import statistics
 from collections import defaultdict
 
-def calculate_time_based_averages(data: List[Dict[str, Any]], value_key: str, timestamp_key: str, metric_type: str = None) -> Dict[str, float]:
+def calculate_time_based_averages(data: List[Dict[str, Any]], value_key: str, timestamp_key: str, metric_type: str = None) -> Dict[str, Any]:
     """Helper function to calculate averages for different time periods"""
     now = datetime.utcnow()
     today = now.date()
@@ -69,12 +69,21 @@ def calculate_time_based_averages(data: List[Dict[str, Any]], value_key: str, ti
             elif metric_type != 'steps' and record_date == today:
                 today_values.append(value)
     
-    # Calculate averages, default to 0 if no data
+    # For heart rate, we need multiple readings per day for meaningful averages
+    min_readings = {
+        'heart_rate': {'monthly': 1000, 'this_month': 500, 'this_week': 100, 'today': 10},
+        'steps': {'monthly': 15, 'this_month': 7, 'this_week': 3, 'today': 1},
+        'sleep': {'monthly': 15, 'this_month': 7, 'this_week': 3, 'today': 1}
+    }.get(metric_type, {'monthly': 1, 'this_month': 1, 'this_week': 1, 'today': 1})
+    
+    # Calculate averages with data validation
     return {
-        'monthly': statistics.mean(monthly_values) if monthly_values else 0,
-        'this_month': statistics.mean(this_month_values) if this_month_values else 0,
-        'this_week': statistics.mean(this_week_values) if this_week_values else 0,
-        'today': sum(today_values) if metric_type == 'sleep' else statistics.mean(today_values) if today_values else 0
+        'monthly': statistics.mean(monthly_values) if len(monthly_values) >= min_readings['monthly'] else 'not enough data',
+        'this_month': statistics.mean(this_month_values) if len(this_month_values) >= min_readings['this_month'] else 'not enough data',
+        'this_week': statistics.mean(this_week_values) if len(this_week_values) >= min_readings['this_week'] else 'not enough data',
+        'today': sum(today_values) if metric_type == 'sleep' and len(today_values) >= min_readings['today'] 
+                else statistics.mean(today_values) if len(today_values) >= min_readings['today']
+                else 'no data from today'
     }
 
 def calculate_sleep_duration(sleep_record: Dict[str, str]) -> float:
@@ -124,27 +133,31 @@ def format_metrics(metrics: Dict[str, Any]) -> str:
     # Format the output string
     output = []
     
+    # Helper function to format numeric values
+    def format_value(value, format_str):
+        return format_str.format(value) if isinstance(value, (int, float)) else str(value)
+    
     # Cardiovascular metrics
     output.append("Cardiovascular metrics:")
-    output.append(f"- Monthly average BPM: {heart_rate_avgs['monthly']:.0f}")
-    output.append(f"- BPM average so far this month: {heart_rate_avgs['this_month']:.0f}")
-    output.append(f"- BPM average this week: {heart_rate_avgs['this_week']:.0f}")
-    output.append(f"- BPM average today: {heart_rate_avgs['today']:.0f}")
+    output.append(f"- Monthly average BPM: {format_value(heart_rate_avgs['monthly'], '{:.0f}')}")
+    output.append(f"- BPM average so far this month: {format_value(heart_rate_avgs['this_month'], '{:.0f}')}")
+    output.append(f"- BPM average this week: {format_value(heart_rate_avgs['this_week'], '{:.0f}')}")
+    output.append(f"- BPM average today: {format_value(heart_rate_avgs['today'], '{:.0f}')}")
     output.append("")
     
     # Sleep metrics
     output.append("Sleep metrics:")
-    output.append(f"- Monthly average sleep: {sleep_avgs['monthly']:.1f} hours / night")
-    output.append(f"- Sleep average so far this month: {sleep_avgs['this_month']:.1f} hours / night")
-    output.append(f"- Sleep average this week: {sleep_avgs['this_week']:.1f} hours / night")
-    output.append(f"- Sleep yesterday: {sleep_avgs['today']:.1f} hours")
+    output.append(f"- Monthly average sleep: {format_value(sleep_avgs['monthly'], '{:.1f} hours / night')}")
+    output.append(f"- Sleep average so far this month: {format_value(sleep_avgs['this_month'], '{:.1f} hours / night')}")
+    output.append(f"- Sleep average this week: {format_value(sleep_avgs['this_week'], '{:.1f} hours / night')}")
+    output.append(f"- Sleep yesterday: {format_value(sleep_avgs['today'], '{:.1f} hours')}")
     output.append("")
     
     # Steps metrics
     output.append("Steps metrics:")
-    output.append(f"- Monthly average steps per day: {step_avgs['monthly']:,.0f}")
-    output.append(f"- Steps average so far this month: {step_avgs['this_month']:,.0f}")
-    output.append(f"- Steps average this week: {step_avgs['this_week']:,.0f}")
-    output.append(f"- Steps yesterday: {step_avgs['today']:,.0f}")
+    output.append(f"- Monthly average steps per day: {format_value(step_avgs['monthly'], '{:,.0f}')}")
+    output.append(f"- Steps average so far this month: {format_value(step_avgs['this_month'], '{:,.0f}')}")
+    output.append(f"- Steps average this week: {format_value(step_avgs['this_week'], '{:,.0f}')}")
+    output.append(f"- Steps yesterday: {format_value(step_avgs['today'], '{:,.0f}')}")
     
     return "\n".join(output)

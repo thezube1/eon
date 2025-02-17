@@ -56,3 +56,9 @@ CREATE TABLE IF NOT EXISTS sync_status (
     UNIQUE(device_id, metric_type)
 );
 
+CREATE TABLE IF NOT EXISTS user_notes (
+    id SERIAL PRIMARY KEY,
+    device_id INTEGER REFERENCES devices(id) NOT NULL,
+    note TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
