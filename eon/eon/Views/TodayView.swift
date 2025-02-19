@@ -81,7 +81,7 @@ struct TodayView: View {
                     await syncData()
                 }
             
-            Text("Recs View")
+            RecsView()
                 .tag(1)
                 .tabItem {
                     Image(systemName: "list.bullet.rectangle")

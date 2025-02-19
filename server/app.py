@@ -4,6 +4,7 @@ import os
 from routes.health import health_bp
 from routes.risk_analysis import risk_analysis_bp, load_model
 from routes.notes import notes_bp
+from routes.recommendations import recommendations_bp
 import threading
 import logging
 
@@ -45,6 +46,7 @@ model_thread.start()
 app.register_blueprint(health_bp, url_prefix='/api/health')
 app.register_blueprint(risk_analysis_bp, url_prefix='/api')
 app.register_blueprint(notes_bp, url_prefix='/api/notes')
+app.register_blueprint(recommendations_bp, url_prefix='/api')
 
 # Basic error handling
 @app.errorhandler(404)

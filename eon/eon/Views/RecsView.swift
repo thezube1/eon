@@ -1,0 +1,170 @@
+import SwiftUI
+
+struct RecsView: View {
+    @State private var recommendations: RecommendationsResponse?
+    @State private var isLoading = false
+    @State private var error: String?
+    
+    var body: some View {
+        NavigationView {
+            Group {
+                if isLoading {
+                    ProgressView("Loading recommendations...")
+                } else if let error = error {
+                    ErrorView(message: error)
+                        .overlay(
+                            Button("Retry") {
+                                Task {
+                                    await loadRecommendations()
+                                }
+                            }
+                            .padding()
+                            .buttonStyle(.bordered)
+                            .offset(y: 100),
+                            alignment: .center
+                        )
+                } else if let recs = recommendations {
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            // Sleep recommendations
+                            RecommendationSection(
+                                title: "Sleep",
+                                icon: "bed.double.fill",
+                                color: .indigo,
+                                recommendations: recs.recommendations.Sleep
+                            )
+                            
+                            // Steps recommendations
+                            RecommendationSection(
+                                title: "Steps",
+                                icon: "figure.walk",
+                                color: .green,
+                                recommendations: recs.recommendations.Steps
+                            )
+                            
+                            // Heart Rate recommendations
+                            RecommendationSection(
+                                title: "Heart Rate",
+                                icon: "heart.fill",
+                                color: .red,
+                                recommendations: recs.recommendations.Heart_Rate
+                            )
+                        }
+                        .padding()
+                    }
+                    .refreshable {
+                        await loadRecommendations()
+                    }
+                } else {
+                    RecsEmptyStateView()
+                }
+            }
+            .navigationTitle("Recommendations")
+        }
+        .onAppear {
+            Task {
+                await loadRecommendations()
+            }
+        }
+    }
+    
+    private func loadRecommendations() async {
+        guard let deviceId = UIDevice.current.identifierForVendor?.uuidString else {
+            error = "Could not determine device ID"
+            return
+        }
+        
+        isLoading = true
+        error = nil
+        
+        do {
+            recommendations = try await NetworkManager.shared.getRecommendations(deviceId: deviceId)
+        } catch {
+            self.error = "Failed to load recommendations: \(error.localizedDescription)"
+        }
+        
+        isLoading = false
+    }
+}
+
+struct RecommendationSection: View {
+    let title: String
+    let icon: String
+    let color: Color
+    let recommendations: [Recommendation]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Section header
+            HStack {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundColor(color)
+                Text(title)
+                    .font(.title2)
+                    .bold()
+            }
+            .padding(.bottom, 4)
+            
+            // Recommendations
+            ForEach(recommendations) { rec in
+                RecommendationCard(recommendation: rec, color: color)
+            }
+        }
+    }
+}
+
+struct RecommendationCard: View {
+    let recommendation: Recommendation
+    let color: Color
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(recommendation.recommendation)
+                .font(.headline)
+            
+            Text(recommendation.explanation)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            
+            HStack {
+                Image(systemName: "clock")
+                    .font(.caption)
+                    .foregroundColor(color)
+                Text(recommendation.frequency)
+                    .font(.caption)
+                    .foregroundColor(color)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.systemBackground))
+                .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: 2)
+        )
+    }
+}
+
+struct RecsEmptyStateView: View {
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "list.bullet.clipboard")
+                .font(.system(size: 50))
+                .foregroundColor(.gray)
+            Text("No Recommendations Available")
+                .font(.headline)
+            Text("Check back later for personalized health recommendations.")
+                .font(.subheadline)
+                .foregroundColor(.gray)
+                .multilineTextAlignment(.center)
+        }
+        .padding()
+    }
+}
+
+struct RecsView_Previews: PreviewProvider {
+    static var previews: some View {
+        RecsView()
+    }
+} 

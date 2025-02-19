@@ -102,7 +102,7 @@ struct UserNotesResponse: Codable {
 
 class NetworkManager {
     static let shared = NetworkManager()
-    private let baseURL = "https://eon-758648273902.us-west1.run.app/api" // Changed from /api/health to /api
+    private let baseURL = "https://eon-550878280011.us-central1.run.app/api" // Changed from /api/health to /api
     
     private init() {}
     
@@ -231,6 +231,32 @@ class NetworkManager {
         }
         
         return try JSONDecoder().decode(RiskAnalysisResponse.self, from: data)
+    }
+    
+    func getRecommendations(deviceId: String) async throws -> RecommendationsResponse {
+        let url = URL(string: "\(baseURL)/recommendations")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        // Create request body
+        let body = ["user_id": deviceId]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NetworkError.invalidResponse
+        }
+        
+        if !(200...299).contains(httpResponse.statusCode) {
+            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                print("Server error response: \(errorJson)")
+            }
+            throw NetworkError.serverError(statusCode: httpResponse.statusCode)
+        }
+        
+        return try JSONDecoder().decode(RecommendationsResponse.self, from: data)
     }
 }
 
