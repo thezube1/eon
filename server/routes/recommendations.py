@@ -183,22 +183,40 @@ def get_recommendations():
             # Make internal request to risk analysis endpoint
             logger.info(f"Running risk analysis for user {user_id}")
             
-            # Get the server's base URL from the request
-            if request.headers.get('Host'):
-                base_url = f"http://{request.headers['Host']}"
-            else:
-                base_url = "http://localhost:8000"  # Default fallback
+            # Always use HTTPS for Cloud Run
+            base_url = "https://eon-550878280011.us-central1.run.app"
                 
             risk_analysis_response = requests.post(
                 f"{base_url}/api/risk-analysis",
                 json={"user_id": user_id},
-                headers={"Content-Type": "application/json"}
+                headers={"Content-Type": "application/json"},
+                allow_redirects=True,  # Allow redirects but maintain POST method
+                verify=True  # Verify SSL certificate
             )
             
+            logger.info(f"Risk analysis response status: {risk_analysis_response.status_code}")
+            logger.info(f"Risk analysis response headers: {dict(risk_analysis_response.headers)}")
+            
             if risk_analysis_response.status_code != 200:
-                return jsonify(risk_analysis_response.json()), risk_analysis_response.status_code
+                error_msg = f"Risk analysis failed with status {risk_analysis_response.status_code}"
+                try:
+                    error_content = risk_analysis_response.text
+                    logger.error(f"Error response content: {error_content}")
+                    error_msg += f". Response: {error_content}"
+                except:
+                    pass
+                return jsonify({'error': error_msg}), risk_analysis_response.status_code
                 
-            risk_analysis_data = risk_analysis_response.json()
+            try:
+                risk_analysis_data = risk_analysis_response.json()
+                logger.info("Successfully parsed risk analysis response")
+            except requests.exceptions.JSONDecodeError as e:
+                logger.error(f"Failed to decode risk analysis response: {str(e)}")
+                logger.error(f"Response content: {risk_analysis_response.text}")
+                return jsonify({
+                    'error': 'Invalid response from risk analysis service'
+                }), 500
+                
             soap_note = risk_analysis_data.get('soap_note')
             formatted_predictions = risk_analysis_data.get('formatted_predictions')
         else:
