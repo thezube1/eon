@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 def format_predictions(data: dict) -> dict:
     """
     Format prediction data using Gemini AI to create a more usable summary.
+    Filters out uncategorized and unrecognized predictions.
     
     Args:
         data (dict): Dictionary containing predictions, metrics, and SOAP note
@@ -39,24 +40,33 @@ soap_note (a full SOAP note summarizing the case)
 
 Your output should do the following:
 Risk Categorization:
-For each prediction, assign a risk category based on its probability:
+For each VALID prediction (ignore any with "Description not found" or unknown descriptions), assign a risk category based on its probability:
 High Risk: if probability ≥ 0.85
 Moderate Risk: if probability is between 0.70 and 0.85
 Low Risk: if probability < 0.70
 
 Disease Clustering:
-Group similar or related diseases into general clusters. For example, conditions related to heart health (like "Coronary atherosclerosis" and "Orthostatic hypotension") should be grouped under a "Cardiovascular" cluster.
-Other clusters might include "Metabolic/Obesity," "Sleep Disorders," "Respiratory," "Neurological," etc.
-If a prediction does not clearly fall into a known category (e.g., "Description not found" or ambiguous codes), assign it to an "Other" or "Uncategorized" group.
+Group similar or related diseases into these specific clusters ONLY:
+- "Cardiovascular" (heart, circulation related)
+- "Respiratory" (breathing, lung related)
+- "Metabolic" (metabolism, diabetes, obesity related)
+- "Neurological" (brain, nerve related)
+- "Sleep" (sleep disorders, insomnia related)
+- "Musculoskeletal" (muscle, bone, joint related)
+DO NOT create any other cluster types.
+If a prediction doesn't clearly fit into one of these clusters, exclude it completely.
+DO NOT include any "Other" or "Uncategorized" clusters.
+DO NOT include any predictions with "Description not found" or unclear descriptions.
 
 Output Format:
 Format your output as a JSON array of clusters. Each cluster should be an object with:
-- cluster_name: string
-- diseases: array of objects with description and icd9_code
+- cluster_name: string (must be one of the specified clusters above)
+- diseases: array of objects with description and icd9_code (only include valid, recognized diseases)
 - risk_level: string ("High Risk", "Moderate Risk", or "Low Risk")
-- explanation: string explaining the risk level
+- explanation: string explaining the risk level based ONLY on the probability value
 
 Make sure your output is clear, concise, and formatted as valid JSON. Use the input data to support your risk interpretations.
+If no valid predictions remain after filtering, return an empty array.
 
 IMPORTANT: Return ONLY the JSON array, with no additional text or formatting."""
 
@@ -118,11 +128,22 @@ IMPORTANT: Return ONLY the JSON array, with no additional text or formatting."""
         # Try to parse the response as JSON
         try:
             parsed_response = json.loads(response_text)
+            
+            # Additional validation to ensure we only have valid clusters
+            valid_clusters = ["Cardiovascular", "Respiratory", "Metabolic", "Neurological", "Sleep", "Musculoskeletal"]
+            filtered_response = [
+                cluster for cluster in parsed_response 
+                if cluster["cluster_name"] in valid_clusters 
+                and all(disease.get("description") != "Description not found" 
+                       and disease.get("description") is not None 
+                       for disease in cluster["diseases"])
+            ]
+            
             if isinstance(parsed_response, dict) and "response" in parsed_response:
                 # If we got a response wrapper, parse the inner content
                 inner_response = json.loads(parsed_response["response"])
                 return inner_response
-            return parsed_response
+            return filtered_response
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse Gemini response as JSON: {response_text}")
             logger.error(f"JSON decode error: {str(e)}")

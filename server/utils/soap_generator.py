@@ -4,9 +4,10 @@ from google.genai import types
 def generate_soap_note(input_text: str) -> str:
     """
     Generate a SOAP note using Gemini model based on input text.
+    Focuses on objective data and user-reported symptoms without speculation.
     
     Args:
-        input_text (str): The input text containing patient data
+        input_text (str): The input text containing patient data and notes
         
     Returns:
         str: Generated SOAP note response
@@ -19,18 +20,42 @@ def generate_soap_note(input_text: str) -> str:
 
     text_part = types.Part.from_text(text=input_text)
     
-    system_instruction = """You are a clinical note generator. Your task is to create a SOAP note based on provided patient data that reflects both lifestyle metrics and subjective feedback. The SOAP note should have four clearly labeled sections:
+    system_instruction = """You are a clinical note generator. Your task is to create a factual, data-driven SOAP note based on provided health metrics and user notes. Focus only on presenting the available data without speculation or interpretation. The SOAP note should have four clearly labeled sections:
+
 Subjective (S):
-Summarize the patient's chief complaint and self-reported symptoms (e.g., feelings of fatigue, dizziness, or stress).
-Include relevant details from the patient history (e.g., recent changes in energy, sleep disturbances, or decreased activity levels).
+- Include only user-reported symptoms and experiences from their notes
+- Present notes chronologically, prioritizing recent notes
+- Do not include any personal identifying information
+- If no notes are available, state "No subjective data provided"
+
 Objective (O):
-List measurable data such as vital signs and lifestyle metrics.
-Include information like average resting heart rate, daily step count, sleep duration, and quality.
-Note any observable changes compared to the patient's typical baseline.
+- List only the measurable health metrics provided
+- For each metric, include only the data points that are available
+- Clearly indicate when data is missing or incomplete
+- Format metrics in clear, readable units (e.g., "Heart Rate: 72 BPM")
+- Present sleep data in hours and minutes
+- Present step counts as whole numbers
+
 Assessment (A):
-Based on the subjective and objective information, provide an evaluation of potential underlying issues or risks (for example, possible cardiovascular strain or metabolic concerns).
-Discuss how these findings might correlate with known risk factors.
-Ensure the note is written in a clear, concise, and clinically appropriate tone. Format your output with distinct headings for each section."""
+- Focus on summarizing the objective findings and recent subjective reports
+- Do not speculate about possible causes or conditions
+- Note any significant changes or patterns only if explicitly shown in the data
+- If data is insufficient for assessment, state "Limited data available for assessment"
+
+Plan (P):
+- Simply state "Continued monitoring of health metrics"
+- Do not make any medical recommendations or suggestions
+
+Important Guidelines:
+1. Only include information that is explicitly provided in the input data
+2. Use clear, clinical language without speculation
+3. Maintain a neutral, factual tone
+4. Clearly indicate when data is missing or incomplete
+5. Format all numbers consistently and clearly
+6. Do not include any personal health advice or recommendations
+7. Do not attempt to diagnose or suggest possible conditions
+
+Return the SOAP note in a clear, structured format with each section clearly labeled."""
 
     model = "gemini-2.0-flash-001"
     contents = [
@@ -41,7 +66,7 @@ Ensure the note is written in a clear, concise, and clinically appropriate tone.
     ]
     
     generate_content_config = types.GenerateContentConfig(
-        temperature=1,
+        temperature=0.7,  # Reduced from 1.0 to be more consistent
         top_p=0.95,
         max_output_tokens=8192,
         response_modalities=["TEXT"],
@@ -66,12 +91,10 @@ Ensure the note is written in a clear, concise, and clinically appropriate tone.
         system_instruction=[types.Part.from_text(text=system_instruction)],
     )
 
-    response_text = ""
-    for chunk in client.models.generate_content_stream(
+    response = client.models.generate_content(
         model=model,
         contents=contents,
         config=generate_content_config,
-    ):
-        response_text += chunk.text
-        
-    return response_text 
+    )
+    
+    return response.text 

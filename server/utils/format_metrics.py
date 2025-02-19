@@ -98,10 +98,10 @@ def format_metrics(metrics: Dict[str, Any]) -> str:
     Format health metrics into a human-readable string with time-based averages.
     
     Args:
-        metrics (dict): Dictionary containing heart rate, steps, and sleep data
+        metrics (dict): Dictionary containing heart rate, steps, sleep data, and notes
         
     Returns:
-        str: Formatted string with metrics averages
+        str: Formatted string with metrics averages and user notes
     """
     if not metrics:
         return "No metrics data available"
@@ -159,5 +159,14 @@ def format_metrics(metrics: Dict[str, Any]) -> str:
     output.append(f"- Steps average so far this month: {format_value(step_avgs['this_month'], '{:,.0f}')}")
     output.append(f"- Steps average this week: {format_value(step_avgs['this_week'], '{:,.0f}')}")
     output.append(f"- Steps yesterday: {format_value(step_avgs['today'], '{:,.0f}')}")
+    output.append("")
+    
+    # User notes
+    if 'notes' in metrics and metrics['notes']:
+        output.append("User Notes (Last 30 Days):")
+        for note in metrics['notes']:
+            output.append(f"[{note['timestamp']}]")
+            output.append(f"{note['note']}")
+            output.append("")  # Add blank line between notes
     
     return "\n".join(output)

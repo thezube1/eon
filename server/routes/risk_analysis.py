@@ -107,7 +107,7 @@ def analyze_risk():
             metrics = retrieve_user_metrics(user_id)
             if metrics:
                 # Format and log the metrics
-                formatted_metrics = format_metrics(metrics)
+                formatted_metrics = json.dumps(metrics, indent=2)
                 logger.info("\nUser Health Metrics Summary:\n" + formatted_metrics)
             else:
                 logger.warning(f"No metrics found for user {user_id}")
