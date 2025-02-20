@@ -103,32 +103,85 @@ struct RecommendationSection: View {
 struct RecommendationCard: View {
     let recommendation: Recommendation
     let color: Color
+    @State private var isUpdating = false
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(recommendation.recommendation)
-                .font(.headline)
-            
-            Text(recommendation.explanation)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-            
+        Button(action: {
+            toggleAcceptance()
+        }) {
             HStack {
-                Image(systemName: "clock")
-                    .font(.caption)
-                    .foregroundColor(color)
-                Text(recommendation.frequency)
-                    .font(.caption)
-                    .foregroundColor(color)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(recommendation.recommendation)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    Text(recommendation.explanation)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    HStack {
+                        Image(systemName: "clock")
+                            .font(.caption)
+                            .foregroundColor(color)
+                        Text(recommendation.frequency)
+                            .font(.caption)
+                            .foregroundColor(color)
+                    }
+                }
+                
+                Spacer()
+                
+                if isUpdating {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle())
+                } else {
+                    Image(systemName: recommendation.accepted ? "checkmark.circle.fill" : "circle")
+                        .foregroundColor(color)
+                        .font(.title2)
+                }
             }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(.systemBackground))
+                    .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: 2)
+            )
         }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(.systemBackground))
-                .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: 2)
-        )
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    private func toggleAcceptance() {
+        guard !isUpdating else { return }
+        
+        isUpdating = true
+        Task {
+            do {
+                try await NetworkManager.shared.updateRecommendationAcceptance(
+                    recommendationId: recommendation.id,
+                    accepted: !recommendation.accepted
+                )
+                // Refresh recommendations after update
+                if let recsView = findParentRecsView() {
+                    await recsView.loadRecommendations()
+                }
+            } catch {
+                print("Error updating recommendation acceptance: \(error)")
+            }
+            isUpdating = false
+        }
+    }
+    
+    private func findParentRecsView() -> RecsView? {
+        // Find parent RecsView to trigger refresh
+        var currentView: UIView? = UIApplication.shared.windows.first?.rootViewController?.view
+        while let view = currentView {
+            if let recsView = view.next as? RecsView {
+                return recsView
+            }
+            currentView = view.superview
+        }
+        return nil
     }
 }
 

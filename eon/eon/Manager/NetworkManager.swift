@@ -290,6 +290,26 @@ class NetworkManager {
             throw error
         }
     }
+    
+    func updateRecommendationAcceptance(recommendationId: Int, accepted: Bool) async throws {
+        let url = URL(string: "\(baseURL)/recommendations/\(recommendationId)/acceptance")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body = ["accepted": accepted]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        
+        let (_, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NetworkError.invalidResponse
+        }
+        
+        if !(200...299).contains(httpResponse.statusCode) {
+            throw NetworkError.serverError(statusCode: httpResponse.statusCode)
+        }
+    }
 }
 
 enum NetworkError: Error {

@@ -320,9 +320,11 @@ def get_device_recommendations(device_id):
             category = rec['category']
             if category in categorized_recommendations:
                 categorized_recommendations[category].append({
+                    'id': rec['id'],
                     'recommendation': rec['recommendation'],
                     'explanation': rec['explanation'],
-                    'frequency': rec['frequency']
+                    'frequency': rec['frequency'],
+                    'accepted': rec['accepted']
                 })
         
         return jsonify({
@@ -332,4 +334,29 @@ def get_device_recommendations(device_id):
         
     except Exception as e:
         logger.error(f"Error retrieving recommendations: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@recommendations_bp.route('/recommendations/<int:recommendation_id>/acceptance', methods=['PUT'])
+def update_recommendation_acceptance(recommendation_id):
+    """Update the acceptance status of a recommendation"""
+    try:
+        data = request.json
+        if 'accepted' not in data:
+            return jsonify({'error': 'Missing accepted status in request body'}), 400
+            
+        accepted = bool(data['accepted'])
+        
+        # Update the recommendation
+        result = supabase.table('recommendations')\
+            .update({'accepted': accepted})\
+            .eq('id', recommendation_id)\
+            .execute()
+            
+        if not result.data:
+            return jsonify({'error': 'Recommendation not found'}), 404
+            
+        return jsonify({'message': 'Recommendation updated successfully'}), 200
+        
+    except Exception as e:
+        logger.error(f"Error updating recommendation acceptance: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500

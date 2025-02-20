@@ -1,9 +1,11 @@
 import Foundation
 
 struct Recommendation: Codable, Identifiable {
+    let id: Int
     let recommendation: String
     let explanation: String
     let frequency: String
+    let accepted: Bool
     
     // Since the API doesn't provide an id, we'll generate one
     var id: String {
