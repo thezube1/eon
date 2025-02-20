@@ -66,7 +66,10 @@ CREATE TABLE IF NOT EXISTS user_notes (
 CREATE TABLE IF NOT EXISTS recommendations (
     id SERIAL PRIMARY KEY,
     device_id INTEGER REFERENCES devices(id) NOT NULL,
+    category VARCHAR(50) NOT NULL, -- e.g. 'Heart_Rate', 'Sleep', 'Steps'
     recommendation TEXT NOT NULL,
+    explanation TEXT NOT NULL,
+    frequency TEXT NOT NULL,
     accepted BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );

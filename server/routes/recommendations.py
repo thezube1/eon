@@ -4,11 +4,43 @@ from google.genai import types
 import json
 import logging
 import requests
+from utils.retrieve_user_metrics import retrieve_user_metrics
+from utils.soap_generator import generate_soap_note
+from utils.store_recommendations import store_recommendations
+from supabase import create_client
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# Create Blueprint
 recommendations_bp = Blueprint('recommendations', __name__)
+
+def init_supabase():
+    """Initialize Supabase client with better error handling"""
+    try:
+        # Hardcoded Supabase credentials
+        supabase_url = "https://teywcjjsffwlvlawueze.supabase.co"
+        supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRleXdjampzZmZ3bHZsYXd1ZXplIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczODI3NTYzNywiZXhwIjoyMDUzODUxNjM3fQ.U7bW40zIoMZEg335gMFWWlh43N7bODBLFmGk8PGeejM"
+        
+        logger.info("Initializing Supabase client")
+        client = create_client(supabase_url, supabase_key)
+        
+        # Test the connection
+        client.table('devices').select('id').limit(1).execute()
+        logger.info("Successfully tested Supabase connection")
+        
+        return client
+    except Exception as e:
+        logger.error(f"Failed to initialize Supabase client: {str(e)}", exc_info=True)
+        raise
+
+# Initialize Supabase client
+try:
+    supabase = init_supabase()
+    logger.info("Supabase client initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize Supabase client: {str(e)}", exc_info=True)
+    raise
 
 def generate_recommendations(soap_note: str, formatted_predictions: list) -> str:
     """
@@ -179,73 +211,125 @@ def get_recommendations():
         # Check if user_id is provided
         user_id = data.get('user_id')
         
-        if user_id:
-            # Make internal request to risk analysis endpoint
-            logger.info(f"Running risk analysis for user {user_id}")
-            
-            # Always use HTTPS for Cloud Run
-            base_url = "https://eon-550878280011.us-central1.run.app"
-                
-            risk_analysis_response = requests.post(
-                f"{base_url}/api/risk-analysis",
-                json={"user_id": user_id},
-                headers={"Content-Type": "application/json"},
-                allow_redirects=True,  # Allow redirects but maintain POST method
-                verify=True  # Verify SSL certificate
-            )
-            
-            logger.info(f"Risk analysis response status: {risk_analysis_response.status_code}")
-            logger.info(f"Risk analysis response headers: {dict(risk_analysis_response.headers)}")
-            
-            if risk_analysis_response.status_code != 200:
-                error_msg = f"Risk analysis failed with status {risk_analysis_response.status_code}"
-                try:
-                    error_content = risk_analysis_response.text
-                    logger.error(f"Error response content: {error_content}")
-                    error_msg += f". Response: {error_content}"
-                except:
-                    pass
-                return jsonify({'error': error_msg}), risk_analysis_response.status_code
-                
-            try:
-                risk_analysis_data = risk_analysis_response.json()
-                logger.info("Successfully parsed risk analysis response")
-            except requests.exceptions.JSONDecodeError as e:
-                logger.error(f"Failed to decode risk analysis response: {str(e)}")
-                logger.error(f"Response content: {risk_analysis_response.text}")
-                return jsonify({
-                    'error': 'Invalid response from risk analysis service'
-                }), 500
-                
-            soap_note = risk_analysis_data.get('soap_note')
-            formatted_predictions = risk_analysis_data.get('formatted_predictions')
-        else:
-            # Use directly provided data
-            soap_note = data.get('soap_note')
-            formatted_predictions = data.get('formatted_predictions')
-        
-        if not soap_note or not formatted_predictions:
+        if not user_id:
             return jsonify({
-                'error': 'Missing required data. Either provide user_id or both soap_note and formatted_predictions.'
+                'error': 'Missing required data. Must provide user_id.'
             }), 400
             
-        # Generate recommendations
+        # Get risk analysis from database using GET endpoint
+        logger.info(f"Getting stored risk analysis for user {user_id}")
+        
+        # Make internal request to risk analysis GET endpoint
+        base_url = "https://eon-550878280011.us-central1.run.app"
+        risk_analysis_response = requests.get(
+            f"{base_url}/api/risk-analysis/{user_id}",
+            headers={"Content-Type": "application/json"},
+            verify=True
+        )
+        
+        logger.info(f"Risk analysis response status: {risk_analysis_response.status_code}")
+        
+        if risk_analysis_response.status_code != 200:
+            error_msg = f"Risk analysis failed with status {risk_analysis_response.status_code}"
+            try:
+                error_content = risk_analysis_response.text
+                logger.error(f"Error response content: {error_content}")
+                error_msg += f". Response: {error_content}"
+            except:
+                pass
+            return jsonify({'error': error_msg}), risk_analysis_response.status_code
+            
+        try:
+            risk_analysis_data = risk_analysis_response.json()
+            logger.info("Successfully parsed risk analysis response")
+            
+            # Check if we have any predictions
+            if not risk_analysis_data.get('predictions'):
+                return jsonify({
+                    'error': 'No risk analysis predictions available for this user.'
+                }), 404
+                
+            formatted_predictions = risk_analysis_data['predictions']
+            
+            # Get SOAP note for the user
+            metrics = retrieve_user_metrics(user_id)
+            if metrics:
+                formatted_metrics = json.dumps(metrics, indent=2)
+                soap_note = generate_soap_note(formatted_metrics)
+            else:
+                logger.warning(f"No metrics found for user {user_id}, generating SOAP note from predictions only")
+                soap_note = generate_soap_note(json.dumps(formatted_predictions, indent=2))
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to decode risk analysis response: {str(e)}")
+            logger.error(f"Response content: {risk_analysis_response.text}")
+            return jsonify({
+                'error': 'Invalid response from risk analysis service'
+            }), 500
+            
+        # Generate recommendations using stored predictions and generated SOAP note
         recommendations = generate_recommendations(soap_note, formatted_predictions)
+        
+        # Store recommendations in database
+        storage_success = store_recommendations(user_id, recommendations)
+        if not storage_success:
+            logger.warning("Failed to store recommendations in database")
         
         response_data = {
             'recommendations': recommendations,
             'source_data': {
                 'soap_note': soap_note,
                 'formatted_predictions': formatted_predictions
-            }
+            },
+            'user_id': user_id
         }
-        
-        # Add user_id to response if it was provided
-        if user_id:
-            response_data['user_id'] = user_id
             
         return jsonify(response_data), 200
         
     except Exception as e:
         logger.error(f"Error in recommendations generation: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@recommendations_bp.route('/recommendations/<device_id>', methods=['GET'])
+def get_device_recommendations(device_id):
+    """Retrieve all recommendations for a given device"""
+    try:
+        # First verify the device exists and get internal ID
+        device_response = supabase.table('devices').select('id').eq('device_id', device_id).execute()
+        if not device_response.data:
+            return jsonify({'error': 'Device not found'}), 404
+            
+        device_internal_id = device_response.data[0]['id']
+        logger.info(f"Found device with internal ID: {device_internal_id}")
+        
+        # Get all recommendations for this device
+        recommendations_response = supabase.table('recommendations')\
+            .select('*')\
+            .eq('device_id', device_internal_id)\
+            .order('created_at', desc=True)\
+            .execute()
+            
+        # Group recommendations by category
+        categorized_recommendations = {
+            'Sleep': [],
+            'Steps': [],
+            'Heart_Rate': []
+        }
+        
+        for rec in recommendations_response.data:
+            category = rec['category']
+            if category in categorized_recommendations:
+                categorized_recommendations[category].append({
+                    'recommendation': rec['recommendation'],
+                    'explanation': rec['explanation'],
+                    'frequency': rec['frequency']
+                })
+        
+        return jsonify({
+            'recommendations': categorized_recommendations,
+            'user_id': device_id
+        })
+        
+    except Exception as e:
+        logger.error(f"Error retrieving recommendations: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500

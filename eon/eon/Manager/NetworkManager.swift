@@ -263,6 +263,24 @@ class NetworkManager {
         
         return try JSONDecoder().decode(RecommendationsResponse.self, from: data)
     }
+    
+    func getStoredRecommendations(deviceId: String) async throws -> RecommendationsResponse {
+        let url = URL(string: "\(baseURL)/recommendations/\(deviceId)")!
+        let (data, response) = try await URLSession.shared.data(from: url)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NetworkError.invalidResponse
+        }
+        
+        if !(200...299).contains(httpResponse.statusCode) {
+            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                print("Server error response: \(errorJson)")
+            }
+            throw NetworkError.serverError(statusCode: httpResponse.statusCode)
+        }
+        
+        return try JSONDecoder().decode(RecommendationsResponse.self, from: data)
+    }
 }
 
 enum NetworkError: Error {

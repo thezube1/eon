@@ -78,7 +78,15 @@ struct RecsView: View {
         error = nil
         
         do {
-            recommendations = try await NetworkManager.shared.getRecommendations(deviceId: deviceId)
+            // First try to get stored recommendations
+            recommendations = try await NetworkManager.shared.getStoredRecommendations(deviceId: deviceId)
+            
+            // If no stored recommendations, generate new ones
+            if recommendations?.recommendations.Sleep.isEmpty == true &&
+               recommendations?.recommendations.Steps.isEmpty == true &&
+               recommendations?.recommendations.Heart_Rate.isEmpty == true {
+                recommendations = try await NetworkManager.shared.getRecommendations(deviceId: deviceId)
+            }
         } catch {
             self.error = "Failed to load recommendations: \(error.localizedDescription)"
         }
