@@ -138,7 +138,7 @@ struct RiskLevelBadge: View {
         case "medium risk":
             return Color.orange.opacity(0.2)
         case "low risk":
-            return Color.yellow.opacity(0.2)
+            return Color.green.opacity(0.2)
         default:
             return Color.gray.opacity(0.2)
         }
@@ -151,7 +151,7 @@ struct RiskLevelBadge: View {
         case "medium risk":
             return Color.orange
         case "low risk":
-            return Color.yellow
+            return Color.green
         default:
             return Color.gray
         }

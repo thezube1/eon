@@ -39,6 +39,7 @@ struct UserNote: Identifiable {
 
 struct TodayView: View {
     @EnvironmentObject var healthManager: HealthManager
+    @Environment(\.colorScheme) var colorScheme
     
     // Tab selection
     @State private var selectedTab = 0
@@ -60,9 +61,15 @@ struct TodayView: View {
     @State private var showConfirmation = false         // For confirmation modal
     @State private var selectedTime: Date? = nil // Changed to optional to track if user has selected a time
     @State private var isDragging: Bool = false
+    @State private var lastSegmentIndex: Int = -1 // Track last segment for haptic feedback
+    @State private var lastHapticTime: TimeInterval = 0 // Track last haptic feedback time
     
     // Timer for refreshing notes
     private let notesRefreshTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
+    
+    // Add haptic feedback generator
+    private let hapticFeedback = UIImpactFeedbackGenerator(style: .light)
+    private let minimumHapticInterval: TimeInterval = 1.0 / 32.0 // 32Hz rate limit
     
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -244,7 +251,16 @@ struct TodayView: View {
         showNoteOverlay = false
     }
     
-    // Update the updateSelectedTime function to handle clicks better
+    // Helper function to provide rate-limited haptic feedback
+    private func provideHapticFeedback() {
+        let currentTime = Date().timeIntervalSince1970
+        if currentTime - lastHapticTime >= minimumHapticInterval {
+            hapticFeedback.impactOccurred()
+            lastHapticTime = currentTime
+        }
+    }
+    
+    // Update the updateSelectedTime function to handle segment feedback
     private func updateSelectedTime(_ y: CGFloat, in geometry: GeometryProxy) {
         let maxHeight = min(geometry.size.height * 0.9, geometry.size.height - 40)
         let progress = max(0, min(1, y / maxHeight))
@@ -254,11 +270,20 @@ struct TodayView: View {
         let selectedSeconds = secondsInDay * Double(progress)
         let newSelectedTime = startOfDay.addingTimeInterval(selectedSeconds)
         
+        // Calculate current segment index
+        let currentSegmentIndex = Int(progress * 48)
+        
+        // If we've moved to a new segment, provide haptic feedback
+        if currentSegmentIndex != lastSegmentIndex && isDragging {
+            provideHapticFeedback()
+            lastSegmentIndex = currentSegmentIndex
+        }
+        
         // Update on main thread to avoid UI warnings
         DispatchQueue.main.async {
             selectedTime = newSelectedTime
             // Update selected category based on the time
-            if let segment = segments[safe: Int(progress * 48)] {
+            if let segment = segments[safe: currentSegmentIndex] {
                 selectedCategory = segment.category
             }
         }
@@ -274,51 +299,50 @@ struct TodayView: View {
     // MARK: - Main Content View
     private var mainContent: some View {
         GeometryReader { screenGeo in
-            VStack {
-                Spacer()
+            VStack(spacing: 0) { // Set spacing to 0 for main VStack
                 Spacer()
                 
-                // Greeting or tapped category text
-                Text(
-                    selectedCategory == nil
-                    ? "\(greeting(for: currentTime))"
-                    : descriptiveString(for: selectedCategory!)
-                )
-                .font(.largeTitle)
-                .bold()
-                
-                // Time display below greeting
-                HStack(spacing: 12) {
-                    Text(timeString(for: selectedTime ?? currentTime))
-                        .font(.title2)
-                        .foregroundColor(.gray)
-                        .animation(.easeInOut, value: selectedTime)
+                VStack(spacing: 16) { // Add VStack with controlled spacing
+                    // Greeting or tapped category text
+                    Text(
+                        selectedCategory == nil
+                        ? "\(greeting(for: currentTime))"
+                        : descriptiveString(for: selectedCategory!)
+                    )
+                    .font(.largeTitle)
+                    .bold()
                     
-                    // Reset button appears when a time is selected
-                    if selectedTime != nil {
-                        Button(action: {
-                            withAnimation {
-                                selectedTime = nil
-                                selectedCategory = nil
+                    // Time display below greeting
+                    HStack(spacing: 12) {
+                        if selectedTime != nil {
+                            Text(timeString(for: selectedTime!))
+                                .font(.title2)
+                                .foregroundColor(.gray)
+                                .transition(.opacity)
+                            
+                            Button(action: {
+                                withAnimation {
+                                    selectedTime = nil
+                                    selectedCategory = nil
+                                }
+                            }) {
+                                Text("Reset")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.white)
+                                    .frame(height: 28)
+                                    .padding(.horizontal, 8)
+                                    .background(
+                                        Capsule()
+                                            .fill(Color.black)
+                                    )
                             }
-                        }) {
-                            Text("Reset")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(
-                                    Capsule()
-                                        .fill(Color.black)
-                                        .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
-                                )
+                            .transition(.opacity.combined(with: .scale))
                         }
-                        .transition(.opacity.combined(with: .scale))
                     }
+                    .frame(height: selectedTime != nil ? 40 : 0) // Collapse height when no time selected
+                    .animation(.easeInOut, value: selectedTime)
                 }
-                
-                Spacer()
                 
                 // Health bar geometry
                 GeometryReader { mainGeo in
@@ -338,12 +362,16 @@ struct TodayView: View {
                         .gesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { value in
-                                    isDragging = true
+                                    if !isDragging {
+                                        hapticFeedback.prepare()
+                                        isDragging = true
+                                    }
                                     let localY = value.location.y
                                     updateSelectedTime(localY, in: mainGeo)
                                 }
                                 .onEnded { value in
                                     isDragging = false
+                                    lastSegmentIndex = -1 // Reset segment tracking
                                     let localY = value.location.y
                                     updateSelectedTime(localY, in: mainGeo)
                                 }
@@ -355,18 +383,22 @@ struct TodayView: View {
                         
                         // Timeline bar
                         Capsule()
-                            .fill(Color(hex: "#393938"))
+                            .fill(colorScheme == .dark ? Color.white : Color(hex: "#393938"))
                             .frame(width: min(mainGeo.size.width, 250) + 20, height: 3)
                             .offset(x: 0, y: indicatorY - 1.5)
                             .gesture(
                                 DragGesture(minimumDistance: 0)
                                     .onChanged { value in
-                                        isDragging = true
+                                        if !isDragging {
+                                            hapticFeedback.prepare()
+                                            isDragging = true
+                                        }
                                         let localY = value.location.y
                                         updateSelectedTime(localY, in: mainGeo)
                                     }
                                     .onEnded { value in
                                         isDragging = false
+                                        lastSegmentIndex = -1 // Reset segment tracking
                                         let localY = value.location.y
                                         updateSelectedTime(localY, in: mainGeo)
                                     }
@@ -426,7 +458,7 @@ struct TodayView: View {
                         } label: {
                             Image(systemName: "plus.circle")
                                 .font(.title)
-                                .foregroundColor(.black)
+                                .foregroundColor(colorScheme == .dark ? .white : .black)
                         }
                         .offset(x: min(mainGeo.size.width, 250)/2 + 35,
                                 y: indicatorY - 16)
@@ -436,7 +468,6 @@ struct TodayView: View {
                 .frame(height: screenGeo.size.height * 0.85)
                 .padding(.horizontal)
                 
-                Spacer()
                 Spacer()
             }
             .overlay {
