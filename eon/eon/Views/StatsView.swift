@@ -13,17 +13,6 @@ struct StatsView: View {
                     ProgressView("Loading risk analysis...")
                 } else if let error = error {
                     ErrorView(message: error)
-                        .overlay(
-                            Button("Retry") {
-                                Task {
-                                    await loadRiskAnalysis()
-                                }
-                            }
-                            .padding()
-                            .buttonStyle(.bordered)
-                            .offset(y: 100),
-                            alignment: .center
-                        )
                 } else if let analysis = riskAnalysis {
                     ScrollView {
                         VStack(spacing: 20) {
@@ -52,9 +41,6 @@ struct StatsView: View {
                             }
                         }
                         .padding(.vertical)
-                    }
-                    .refreshable {
-                        await loadRiskAnalysis()
                     }
                 } else {
                     EmptyStateView()

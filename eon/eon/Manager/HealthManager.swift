@@ -13,7 +13,6 @@ class HealthManager: ObservableObject {
     let healthStore = HKHealthStore()
     private let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? "unknown"
     @Published var lastSyncTime: Date?
-    
     @Published var isAuthorized: Bool {
         didSet {
             UserDefaults.standard.set(isAuthorized, forKey: "HealthKitAuthorized")
@@ -149,52 +148,62 @@ class HealthManager: ObservableObject {
        do {
            print("Starting sync with deviceId: \(deviceId)")
            
-           // First try to sync health data to create the device if it doesn't exist
-           var initialHealthData: [String: [[String: Any]]] = [:]
-           
-           // Get initial data from the last 24 hours
-           let oneDayAgo = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
-           
-           if let heartRateData = await fetchHeartRateDataSince(oneDayAgo) {
-               initialHealthData["heart_rate"] = heartRateData
-           }
-           if let stepData = await fetchStepDataSince(oneDayAgo) {
-               initialHealthData["steps"] = stepData
-           }
-           if let sleepData = await fetchSleepDataSince(oneDayAgo) {
-               initialHealthData["sleep"] = sleepData
-           }
-           
-           // Initial sync to ensure device exists
-           try await NetworkManager.shared.syncHealthData(deviceId: deviceId, healthData: initialHealthData)
-           print("Initial sync completed successfully")
-           
-           // Now get the sync status
+           // Get sync status first
            let syncStatus = try await NetworkManager.shared.getSyncStatus(deviceId: deviceId)
            print("Retrieved sync status:")
            print("  Heart Rate Last Sync: \(syncStatus.syncStatus.heartRate ?? "never")")
            print("  Steps Last Sync: \(syncStatus.syncStatus.steps ?? "never")")
            print("  Sleep Last Sync: \(syncStatus.syncStatus.sleep ?? "never")")
            print("  Overall Last Sync: \(syncStatus.lastSync ?? "never")")
-
-           // If we have a last sync time, get data since then
-           if let lastSync = syncStatus.lastSync.flatMap({ ISO8601DateFormatter().date(from: $0) }) {
-               var healthData: [String: [[String: Any]]] = [:]
-               
-               if let heartRateData = await fetchHeartRateDataSince(lastSync) {
+           
+           var healthData: [String: [[String: Any]]] = [:]
+           
+           // For each metric, fetch data since its last sync time
+           let formatter = ISO8601DateFormatter()
+           
+           // Heart Rate
+           if let lastHeartRateSync = syncStatus.syncStatus.heartRate.flatMap({ formatter.date(from: $0) }) {
+               if let heartRateData = await fetchHeartRateDataSince(lastHeartRateSync) {
                    healthData["heart_rate"] = heartRateData
                }
-               if let stepData = await fetchStepDataSince(lastSync) {
+           } else {
+               // If never synced, get last 24 hours
+               let oneDayAgo = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
+               if let heartRateData = await fetchHeartRateDataSince(oneDayAgo) {
+                   healthData["heart_rate"] = heartRateData
+               }
+           }
+           
+           // Steps
+           if let lastStepsSync = syncStatus.syncStatus.steps.flatMap({ formatter.date(from: $0) }) {
+               if let stepData = await fetchStepDataSince(lastStepsSync) {
                    healthData["steps"] = stepData
                }
-               if let sleepData = await fetchSleepDataSince(lastSync) {
+           } else {
+               let oneDayAgo = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
+               if let stepData = await fetchStepDataSince(oneDayAgo) {
+                   healthData["steps"] = stepData
+               }
+           }
+           
+           // Sleep
+           if let lastSleepSync = syncStatus.syncStatus.sleep.flatMap({ formatter.date(from: $0) }) {
+               if let sleepData = await fetchSleepDataSince(lastSleepSync) {
                    healthData["sleep"] = sleepData
                }
-               
-               if !healthData.isEmpty {
-                   try await NetworkManager.shared.syncHealthData(deviceId: deviceId, healthData: healthData)
-                   print("Incremental sync completed successfully")
+           } else {
+               let oneDayAgo = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
+               if let sleepData = await fetchSleepDataSince(oneDayAgo) {
+                   healthData["sleep"] = sleepData
                }
+           }
+           
+           // Only sync if we have data to sync
+           if !healthData.isEmpty {
+               try await NetworkManager.shared.syncHealthData(deviceId: deviceId, healthData: healthData)
+               print("Sync completed successfully")
+           } else {
+               print("No new data to sync")
            }
            
            // Update last sync time
@@ -548,5 +557,10 @@ class HealthManager: ObservableObject {
             }
             healthStore.execute(query)
         }
+
+    // Update the checkAndSync method to simply call syncWithServer
+    func checkAndSync() async {
+        await syncWithServer()
     }
+}
 

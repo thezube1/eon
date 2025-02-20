@@ -279,7 +279,16 @@ class NetworkManager {
             throw NetworkError.serverError(statusCode: httpResponse.statusCode)
         }
         
-        return try JSONDecoder().decode(RecommendationsResponse.self, from: data)
+        do {
+            let decoder = JSONDecoder()
+            return try decoder.decode(RecommendationsResponse.self, from: data)
+        } catch {
+            print("Decoding error: \(error)")
+            if let dataString = String(data: data, encoding: .utf8) {
+                print("Raw response data: \(dataString)")
+            }
+            throw error
+        }
     }
 }
 

@@ -12,17 +12,6 @@ struct RecsView: View {
                     ProgressView("Loading recommendations...")
                 } else if let error = error {
                     ErrorView(message: error)
-                        .overlay(
-                            Button("Retry") {
-                                Task {
-                                    await loadRecommendations()
-                                }
-                            }
-                            .padding()
-                            .buttonStyle(.bordered)
-                            .offset(y: 100),
-                            alignment: .center
-                        )
                 } else if let recs = recommendations {
                     ScrollView {
                         VStack(spacing: 24) {
@@ -52,9 +41,6 @@ struct RecsView: View {
                         }
                         .padding()
                     }
-                    .refreshable {
-                        await loadRecommendations()
-                    }
                 } else {
                     RecsEmptyStateView()
                 }
@@ -78,15 +64,7 @@ struct RecsView: View {
         error = nil
         
         do {
-            // First try to get stored recommendations
             recommendations = try await NetworkManager.shared.getStoredRecommendations(deviceId: deviceId)
-            
-            // If no stored recommendations, generate new ones
-            if recommendations?.recommendations.Sleep.isEmpty == true &&
-               recommendations?.recommendations.Steps.isEmpty == true &&
-               recommendations?.recommendations.Heart_Rate.isEmpty == true {
-                recommendations = try await NetworkManager.shared.getRecommendations(deviceId: deviceId)
-            }
         } catch {
             self.error = "Failed to load recommendations: \(error.localizedDescription)"
         }

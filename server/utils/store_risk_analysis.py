@@ -35,7 +35,9 @@ except Exception as e:
 def store_risk_analysis(device_id: str, analysis_text_used: str, formatted_predictions: list) -> bool:
     """
     Store the formatted risk analysis predictions in Supabase.
-    If a cluster already exists for the device, merge any new diseases into it.
+    If a cluster already exists for the device:
+    - Update risk level if it has changed
+    - Merge any new diseases into it
     
     Args:
         device_id (str): The device_id of the user
@@ -67,7 +69,12 @@ def store_risk_analysis(device_id: str, analysis_text_used: str, formatted_predi
                 .execute()
             
             if existing_cluster.data:
-                # Cluster exists, merge new diseases with existing ones
+                # Cluster exists, check if risk level has changed
+                existing_risk_level = existing_cluster.data[0]['risk_level']
+                new_risk_level = cluster['risk_level']
+                risk_level_changed = existing_risk_level != new_risk_level
+                
+                # Merge new diseases with existing ones
                 existing_diseases = existing_cluster.data[0]['diseases']
                 new_diseases = cluster['diseases']
                 
@@ -81,23 +88,25 @@ def store_risk_analysis(device_id: str, analysis_text_used: str, formatted_predi
                         merged_diseases.append(disease)
                         existing_icd9_codes.add(disease['icd9_code'])
                 
-                # Update the existing cluster with merged diseases
-                update_data = {
-                    'diseases': merged_diseases,
-                    'risk_level': cluster['risk_level'],  # Update risk level with latest
-                    'explanation': cluster['explanation'],  # Update explanation with latest
-                    'created_at': datetime.utcnow().isoformat()  # Update timestamp
-                }
-                
-                logger.info(f"Updating existing cluster: {cluster['cluster_name']} with merged diseases")
-                result = supabase.table('risk_analysis_predictions')\
-                    .update(update_data)\
-                    .eq('id', existing_cluster.data[0]['id'])\
-                    .execute()
+                # If risk level changed or we have new diseases, create a new row
+                if risk_level_changed or len(merged_diseases) > len(existing_diseases):
+                    prediction_data = {
+                        'device_id': device_internal_id,
+                        'cluster_name': cluster['cluster_name'],
+                        'risk_level': new_risk_level,
+                        'explanation': cluster['explanation'],
+                        'diseases': merged_diseases,
+                        'created_at': datetime.utcnow().isoformat()
+                    }
                     
-                if not result.data:
-                    logger.error(f"Failed to update cluster: {cluster['cluster_name']}")
-                    return False
+                    logger.info(f"Creating new row for cluster {cluster['cluster_name']} due to {'risk level change' if risk_level_changed else 'new diseases'}")
+                    result = supabase.table('risk_analysis_predictions').insert(prediction_data).execute()
+                    
+                    if not result.data:
+                        logger.error(f"Failed to store prediction cluster: {cluster['cluster_name']}")
+                        return False
+                else:
+                    logger.info(f"No changes detected for cluster: {cluster['cluster_name']}")
             else:
                 # No existing cluster, create new one
                 prediction_data = {

@@ -278,10 +278,11 @@ def get_risk_analysis(device_id):
                 'predictions': []
             })
             
-        # Group predictions by cluster
+        # Group predictions by cluster, keeping the most recent entry for each cluster
         clusters = {}
         for prediction in predictions_response.data:
             cluster_name = prediction['cluster_name']
+            # Always take the most recent prediction for each cluster
             if cluster_name not in clusters:
                 clusters[cluster_name] = prediction
                 

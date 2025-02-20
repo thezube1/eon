@@ -58,9 +58,6 @@ struct TodayView: View {
     @State private var selectedTime: Date? = nil // Changed to optional to track if user has selected a time
     @State private var isDragging: Bool = false
     
-    // Add state for syncing
-    @State private var isSyncing = false
-    
     // Timer for refreshing notes
     private let notesRefreshTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
     
@@ -73,12 +70,15 @@ struct TodayView: View {
                     Text("Today")
                 }
                 .task {
-                    // Initial sync when view appears
-                    await syncData()
+                    // Sync when app opens
+                    await healthManager.syncWithServer()
                 }
                 .refreshable {
-                    // Allow pull-to-refresh to trigger a sync
-                    await syncData()
+                    // Allow pull-to-refresh to sync and update segments
+                    await healthManager.syncWithServer()
+                    healthManager.dailySegments { newSegments in
+                        self.segments = newSegments
+                    }
                 }
             
             RecsView()
@@ -261,19 +261,6 @@ struct TodayView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mm a"
         return formatter.string(from: date)
-    }
-    
-    // Add sync function
-    private func syncData() async {
-        guard !isSyncing else { return }
-        isSyncing = true
-        await healthManager.syncWithServer()
-        isSyncing = false
-        
-        // Refresh segments after sync
-        healthManager.dailySegments { newSegments in
-            self.segments = newSegments
-        }
     }
     
     // MARK: - Main Content View
@@ -526,27 +513,6 @@ struct TodayView: View {
                     }
                     .transition(.opacity.combined(with: .scale))
                     .animation(.easeInOut, value: showConfirmation)
-                }
-                
-                // Add syncing overlay
-                if isSyncing {
-                    ZStack {
-                        Color.black.opacity(0.3)
-                            .ignoresSafeArea()
-                        VStack {
-                            ProgressView()
-                                .tint(.white)
-                            Text("Syncing health data...")
-                                .foregroundColor(.white)
-                                .font(.headline)
-                                .padding(.top, 8)
-                        }
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(Color.black.opacity(0.7))
-                        )
-                    }
                 }
             }
         }
