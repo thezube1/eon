@@ -208,14 +208,9 @@ class NetworkManager {
     }
     
     func getRiskAnalysis(deviceId: String) async throws -> RiskAnalysisResponse {
-        let url = URL(string: "\(baseURL)/risk-analysis")!
+        let url = URL(string: "\(baseURL)/risk-analysis/\(deviceId)")!
         var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        // Create request body
-        let body = ["user_id": deviceId]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.httpMethod = "GET"
         
         let (data, response) = try await URLSession.shared.data(for: request)
         
@@ -230,7 +225,17 @@ class NetworkManager {
             throw NetworkError.serverError(statusCode: httpResponse.statusCode)
         }
         
-        return try JSONDecoder().decode(RiskAnalysisResponse.self, from: data)
+        // Decode the response into our existing RiskAnalysisResponse structure
+        let rawResponse = try JSONDecoder().decode(RawRiskAnalysisResponse.self, from: data)
+        
+        // Convert the raw response to our existing RiskAnalysisResponse format
+        return RiskAnalysisResponse(
+            analysis_text_used: "Database",  // Since we're getting from DB
+            formatted_predictions: rawResponse.predictions,
+            metrics_summary: nil,  // These fields aren't needed when getting from DB
+            soap_note: nil,
+            predictions: []  // Raw predictions aren't needed when getting from DB
+        )
     }
     
     func getRecommendations(deviceId: String) async throws -> RecommendationsResponse {
@@ -264,4 +269,10 @@ enum NetworkError: Error {
     case invalidResponse
     case invalidData
     case serverError(statusCode: Int)
+}
+
+// Add new structure to decode the GET response
+private struct RawRiskAnalysisResponse: Codable {
+    let device_id: String
+    let predictions: [RiskCluster]
 }

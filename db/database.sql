@@ -62,3 +62,21 @@ CREATE TABLE IF NOT EXISTS user_notes (
     note TEXT NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS recommendations (
+    id SERIAL PRIMARY KEY,
+    device_id INTEGER REFERENCES devices(id) NOT NULL,
+    recommendation TEXT NOT NULL,
+    accepted BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS risk_analysis_predictions (
+    id SERIAL PRIMARY KEY,
+    device_id INTEGER REFERENCES devices(id) NOT NULL,
+    cluster_name VARCHAR(50) NOT NULL,
+    risk_level VARCHAR(20) NOT NULL,
+    explanation TEXT NOT NULL,
+    diseases JSONB NOT NULL, -- Array of objects with icd9_code and description
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);

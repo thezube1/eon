@@ -32,16 +32,23 @@ struct StatsView: View {
                                 Text("Risk Analysis")
                                     .font(.largeTitle)
                                     .bold()
-                                Text("Based on \(analysis.analysis_text_used)")
+                                Text("Stored Risk Predictions")
                                     .font(.subheadline)
                                     .foregroundColor(.gray)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal)
                             
-                            // Risk clusters
-                            ForEach(analysis.formatted_predictions, id: \.cluster_name) { cluster in
-                                RiskClusterView(cluster: cluster)
+                            if analysis.formatted_predictions.isEmpty {
+                                Text("No risk predictions available yet.")
+                                    .font(.headline)
+                                    .foregroundColor(.gray)
+                                    .padding()
+                            } else {
+                                // Risk clusters
+                                ForEach(analysis.formatted_predictions, id: \.cluster_name) { cluster in
+                                    RiskClusterView(cluster: cluster)
+                                }
                             }
                         }
                         .padding(.vertical)
@@ -74,7 +81,7 @@ struct StatsView: View {
         do {
             riskAnalysis = try await NetworkManager.shared.getRiskAnalysis(deviceId: deviceId)
         } catch {
-            self.error = "Failed to load risk analysis: \(error.localizedDescription)"
+            self.error = "Failed to load stored risk analysis: \(error.localizedDescription)"
         }
         
         isLoading = false

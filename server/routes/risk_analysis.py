@@ -15,9 +15,37 @@ from utils.retrieve_user_metrics import retrieve_user_metrics
 from utils.format_metrics import format_metrics
 from utils.soap_generator import generate_soap_note
 from utils.format_predictions import format_predictions
+from utils.store_risk_analysis import store_risk_analysis
 
 # Simple logger without custom configuration
 logger = logging.getLogger(__name__)
+
+def init_supabase():
+    """Initialize Supabase client with better error handling"""
+    try:
+        # Hardcoded Supabase credentials
+        supabase_url = "https://teywcjjsffwlvlawueze.supabase.co"
+        supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRleXdjampzZmZ3bHZsYXd1ZXplIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczODI3NTYzNywiZXhwIjoyMDUzODUxNjM3fQ.U7bW40zIoMZEg335gMFWWlh43N7bODBLFmGk8PGeejM"
+        
+        logger.info("Initializing Supabase client")
+        client = create_client(supabase_url, supabase_key)
+        
+        # Test the connection
+        client.table('devices').select('id').limit(1).execute()
+        logger.info("Successfully tested Supabase connection")
+        
+        return client
+    except Exception as e:
+        logger.error(f"Failed to initialize Supabase client: {str(e)}", exc_info=True)
+        raise
+
+# Initialize Supabase client
+try:
+    supabase = init_supabase()
+    logger.info("Supabase client initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize Supabase client: {str(e)}", exc_info=True)
+    raise
 
 # Global variables for model management
 model = None
@@ -202,6 +230,17 @@ def analyze_risk():
                 logger.debug(f"Raw response: {formatted_predictions['raw_response']}")
         else:
             logger.info(f"\nFormatted Predictions:\n{json.dumps(formatted_predictions, indent=2)}")
+            
+            # Store predictions in Supabase if we have a user_id
+            if user_id:
+                logger.info("Storing risk analysis predictions")
+                storage_success = store_risk_analysis(
+                    device_id=user_id,
+                    analysis_text_used=response_data["analysis_text_used"],
+                    formatted_predictions=formatted_predictions
+                )
+                if not storage_success:
+                    logger.warning("Failed to store risk analysis predictions")
         
         # Add formatted predictions to response
         response_data["formatted_predictions"] = formatted_predictions
@@ -210,4 +249,50 @@ def analyze_risk():
         
     except Exception as e:
         logger.error(f"Error in diagnosis prediction: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@risk_analysis_bp.route('/risk-analysis/<device_id>', methods=['GET'])
+def get_risk_analysis(device_id):
+    """Retrieve all risk analysis predictions for a given device"""
+    try:
+        # First verify the device exists and get internal ID
+        device_response = supabase.table('devices').select('id').eq('device_id', device_id).execute()
+        if not device_response.data:
+            logger.warning(f"Device not found: {device_id}")
+            return jsonify({'error': 'Device not found'}), 404
+        
+        device_internal_id = device_response.data[0]['id']
+        logger.info(f"Found device with internal ID: {device_internal_id}")
+        
+        # Get all risk predictions for this device
+        predictions_response = supabase.table('risk_analysis_predictions')\
+            .select('*')\
+            .eq('device_id', device_internal_id)\
+            .order('created_at', desc=True)\
+            .execute()
+            
+        if not predictions_response.data:
+            logger.info(f"No risk predictions found for device: {device_id}")
+            return jsonify({
+                'device_id': device_id,
+                'predictions': []
+            })
+            
+        # Group predictions by cluster
+        clusters = {}
+        for prediction in predictions_response.data:
+            cluster_name = prediction['cluster_name']
+            if cluster_name not in clusters:
+                clusters[cluster_name] = prediction
+                
+        # Convert to list and format response
+        formatted_predictions = list(clusters.values())
+        
+        return jsonify({
+            'device_id': device_id,
+            'predictions': formatted_predictions
+        })
+        
+    except Exception as e:
+        logger.error(f"Error retrieving risk analysis: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
