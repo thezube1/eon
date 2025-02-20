@@ -20,7 +20,8 @@ struct RecsView: View {
                                 title: "Sleep",
                                 icon: "bed.double.fill",
                                 color: .indigo,
-                                recommendations: recs.recommendations.Sleep
+                                recommendations: recs.recommendations.Sleep,
+                                onRecommendationUpdated: loadRecommendations
                             )
                             
                             // Steps recommendations
@@ -28,7 +29,8 @@ struct RecsView: View {
                                 title: "Steps",
                                 icon: "figure.walk",
                                 color: .green,
-                                recommendations: recs.recommendations.Steps
+                                recommendations: recs.recommendations.Steps,
+                                onRecommendationUpdated: loadRecommendations
                             )
                             
                             // Heart Rate recommendations
@@ -36,7 +38,8 @@ struct RecsView: View {
                                 title: "Heart Rate",
                                 icon: "heart.fill",
                                 color: .red,
-                                recommendations: recs.recommendations.Heart_Rate
+                                recommendations: recs.recommendations.Heart_Rate,
+                                onRecommendationUpdated: loadRecommendations
                             )
                         }
                         .padding()
@@ -54,7 +57,7 @@ struct RecsView: View {
         }
     }
     
-    private func loadRecommendations() async {
+    func loadRecommendations() async {
         guard let deviceId = UIDevice.current.identifierForVendor?.uuidString else {
             error = "Could not determine device ID"
             return
@@ -78,6 +81,7 @@ struct RecommendationSection: View {
     let icon: String
     let color: Color
     let recommendations: [Recommendation]
+    let onRecommendationUpdated: () async -> Void
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -94,7 +98,11 @@ struct RecommendationSection: View {
             
             // Recommendations
             ForEach(recommendations) { rec in
-                RecommendationCard(recommendation: rec, color: color)
+                RecommendationCard(
+                    recommendation: rec,
+                    color: color,
+                    onRecommendationUpdated: onRecommendationUpdated
+                )
             }
         }
     }
@@ -103,6 +111,7 @@ struct RecommendationSection: View {
 struct RecommendationCard: View {
     let recommendation: Recommendation
     let color: Color
+    let onRecommendationUpdated: () async -> Void
     @State private var isUpdating = false
     
     var body: some View {
@@ -135,7 +144,7 @@ struct RecommendationCard: View {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle())
                 } else {
-                    Image(systemName: recommendation.accepted ? "checkmark.circle.fill" : "circle")
+                    Image(systemName: recommendation.accepted == true ? "checkmark.circle.fill" : "circle")
                         .foregroundColor(color)
                         .font(.title2)
                 }
@@ -149,39 +158,26 @@ struct RecommendationCard: View {
             )
         }
         .buttonStyle(PlainButtonStyle())
+        .disabled(recommendation.id == nil)  // Disable interaction if no ID
     }
     
     private func toggleAcceptance() {
-        guard !isUpdating else { return }
+        guard !isUpdating, let id = recommendation.id else { return }
         
         isUpdating = true
         Task {
             do {
                 try await NetworkManager.shared.updateRecommendationAcceptance(
-                    recommendationId: recommendation.id,
-                    accepted: !recommendation.accepted
+                    recommendationId: id,
+                    accepted: !(recommendation.accepted ?? false)
                 )
                 // Refresh recommendations after update
-                if let recsView = findParentRecsView() {
-                    await recsView.loadRecommendations()
-                }
+                await onRecommendationUpdated()
             } catch {
                 print("Error updating recommendation acceptance: \(error)")
             }
             isUpdating = false
         }
-    }
-    
-    private func findParentRecsView() -> RecsView? {
-        // Find parent RecsView to trigger refresh
-        var currentView: UIView? = UIApplication.shared.windows.first?.rootViewController?.view
-        while let view = currentView {
-            if let recsView = view.next as? RecsView {
-                return recsView
-            }
-            currentView = view.superview
-        }
-        return nil
     }
 }
 

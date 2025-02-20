@@ -207,7 +207,7 @@ class NetworkManager {
         return notesResponse.notes
     }
     
-    func getRiskAnalysis(deviceId: String) async throws -> RiskAnalysisResponse {
+    func getStoredRiskAnalysis(deviceId: String) async throws -> RiskAnalysisResponse {
         let url = URL(string: "\(baseURL)/risk-analysis/\(deviceId)")!
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -236,6 +236,31 @@ class NetworkManager {
             soap_note: nil,
             predictions: []  // Raw predictions aren't needed when getting from DB
         )
+    }
+    
+    func calculateRiskAnalysis(deviceId: String) async throws -> RiskAnalysisResponse {
+        let postUrl = URL(string: "\(baseURL)/risk-analysis")!
+        var request = URLRequest(url: postUrl)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body = ["user_id": deviceId]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NetworkError.invalidResponse
+        }
+        
+        if !(200...299).contains(httpResponse.statusCode) {
+            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                print("Server error response: \(errorJson)")
+            }
+            throw NetworkError.serverError(statusCode: httpResponse.statusCode)
+        }
+        
+        return try JSONDecoder().decode(RiskAnalysisResponse.self, from: data)
     }
     
     func getRecommendations(deviceId: String) async throws -> RecommendationsResponse {

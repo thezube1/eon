@@ -48,6 +48,9 @@ struct TodayView: View {
     @State private var segments: [HalfHourSegment] = []
     @State private var selectedCategory: ActivityCategory? = nil
     
+    // Add state to track if we've already run analysis
+    @State private var hasRunAnalysis = false
+    
     // 2) New states for notes
     @State private var userNotes: [UserNote] = []        // The array of notes
     @State private var showNoteOverlay = false           // Toggle the overlay
@@ -72,6 +75,11 @@ struct TodayView: View {
                 .task {
                     // Sync when app opens
                     await healthManager.syncWithServer()
+                    // After sync completes, run analysis if needed
+                    if !hasRunAnalysis {
+                        await runAnalysisAndRecommendations()
+                        hasRunAnalysis = true
+                    }
                 }
                 .refreshable {
                     // Allow pull-to-refresh to sync and update segments
@@ -513,6 +521,42 @@ struct TodayView: View {
                     }
                     .transition(.opacity.combined(with: .scale))
                     .animation(.easeInOut, value: showConfirmation)
+                }
+            }
+        }
+    }
+    
+    // Add new function for running analysis and recommendations
+    private func runAnalysisAndRecommendations() async {
+        guard let deviceId = UIDevice.current.identifierForVendor?.uuidString else {
+            print("No device ID available")
+            return
+        }
+        
+        do {
+            print("Starting risk analysis calculation...")
+            // First run risk analysis
+            let riskAnalysisResponse = try await NetworkManager.shared.calculateRiskAnalysis(deviceId: deviceId)
+            
+            print("Risk analysis completed, checking predictions...")
+            // If risk analysis succeeds and has predictions, get recommendations
+            if riskAnalysisResponse.formatted_predictions.count > 0 {
+                print("Generating recommendations based on risk analysis...")
+                do {
+                    _ = try await NetworkManager.shared.getRecommendations(deviceId: deviceId)
+                    print("Recommendations generated successfully")
+                } catch {
+                    print("Error generating recommendations: \(error)")
+                }
+            } else {
+                print("No predictions found in risk analysis response")
+            }
+        } catch {
+            print("Error calculating risk analysis: \(error)")
+            if let urlError = error as? URLError {
+                print("URL Error details: \(urlError.localizedDescription)")
+                if urlError.code == .cancelled {
+                    print("Request was cancelled - this might be due to rapid view transitions")
                 }
             }
         }

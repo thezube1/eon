@@ -65,7 +65,7 @@ struct StatsView: View {
         error = nil
         
         do {
-            riskAnalysis = try await NetworkManager.shared.getRiskAnalysis(deviceId: deviceId)
+            riskAnalysis = try await NetworkManager.shared.getStoredRiskAnalysis(deviceId: deviceId)
         } catch {
             self.error = "Failed to load stored risk analysis: \(error.localizedDescription)"
         }

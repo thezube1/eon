@@ -1,16 +1,14 @@
 import Foundation
 
 struct Recommendation: Codable, Identifiable {
-    let id: Int
+    let id: Int?
     let recommendation: String
     let explanation: String
     let frequency: String
-    let accepted: Bool
+    let accepted: Bool?
     
-    // Since the API doesn't provide an id, we'll generate one
-    var id: String {
-        // Create a unique id based on the recommendation content
-        recommendation.hash.description
+    var identifiableId: Int {
+        return id ?? -1
     }
 }
 
