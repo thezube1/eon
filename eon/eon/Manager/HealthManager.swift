@@ -61,7 +61,7 @@ class HealthManager: ObservableObject {
         }
     }
 
-    private func fetchAllHealthData() {
+    func fetchAllHealthData() {
         fetchStepCount()
         fetchHeartRate()
         fetchSleepHours()

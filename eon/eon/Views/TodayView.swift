@@ -96,18 +96,18 @@ struct TodayView: View {
                     }
                 }
             
-            RecsView()
-                .tag(1)
-                .tabItem {
-                    Image(systemName: "list.bullet.rectangle")
-                    Text("Recs")
-                }
-            
             StatsView()
-                .tag(2)
+                .tag(1)
                 .tabItem {
                     Image(systemName: "chart.bar.xaxis")
                     Text("Stats")
+                }
+            
+            RecsView()
+                .tag(2)
+                .tabItem {
+                    Image(systemName: "list.bullet.rectangle")
+                    Text("Recs")
                 }
         }
         .onAppear {
@@ -115,6 +115,7 @@ struct TodayView: View {
             healthManager.dailySegments { newSegments in
                 self.segments = newSegments
             }
+            healthManager.fetchAllHealthData()
             startTimer()
             
             // Initial notes load

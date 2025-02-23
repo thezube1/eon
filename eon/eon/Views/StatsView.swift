@@ -6,6 +6,66 @@ struct StatsView: View {
     @State private var isLoading = false
     @State private var error: String? = nil
     
+    // State variables for dropdown toggles
+    @State private var showPrimaryFactors = true
+    @State private var showOtherFactors = false
+    
+    // Helper function to categorize diseases
+    private func categorizedDiseases() -> (primary: [RiskCluster], other: [RiskCluster]) {
+        guard let analysis = riskAnalysis else { return ([], []) }
+        
+        var primaryClusters: [RiskCluster] = []
+        var otherClusters: [RiskCluster] = []
+        var processedDiseases: Set<String> = []
+        
+        // First, create primary clusters
+        let primaryCategories = ["Cardiovascular", "Sleep", "Endocrine"]
+        
+        for category in primaryCategories {
+            var categoryDiseases: [Disease] = []
+            
+            for cluster in analysis.formatted_predictions {
+                for disease in cluster.diseases {
+                    let description = disease.description.lowercased()
+                    let shouldInclude = (
+                        category == "Cardiovascular" && (description.contains("heart") || description.contains("cardio") || description.contains("blood")) ||
+                        category == "Sleep" && (description.contains("sleep") || description.contains("insomnia") || description.contains("apnea")) ||
+                        category == "Endocrine" && (description.contains("diabetes") || description.contains("thyroid") || description.contains("hormone"))
+                    )
+                    
+                    if shouldInclude && !processedDiseases.contains(disease.icd9_code) {
+                        categoryDiseases.append(disease)
+                        processedDiseases.insert(disease.icd9_code)
+                    }
+                }
+            }
+            
+            if !categoryDiseases.isEmpty {
+                primaryClusters.append(RiskCluster(
+                    cluster_name: category,
+                    diseases: categoryDiseases,
+                    explanation: "Primary health factors related to \(category.lowercased()) conditions",
+                    risk_level: categoryDiseases.count > 2 ? "High Risk" : "Medium Risk"
+                ))
+            }
+        }
+        
+        // Then filter remaining diseases for other clusters
+        otherClusters = analysis.formatted_predictions.compactMap { cluster -> RiskCluster? in
+            let remainingDiseases = cluster.diseases.filter { !processedDiseases.contains($0.icd9_code) }
+            guard !remainingDiseases.isEmpty else { return nil }
+            
+            return RiskCluster(
+                cluster_name: cluster.cluster_name,
+                diseases: remainingDiseases,
+                explanation: cluster.explanation,
+                risk_level: cluster.risk_level
+            )
+        }
+        
+        return (primaryClusters, otherClusters)
+    }
+    
     var body: some View {
         NavigationView {
             Group {
@@ -13,7 +73,7 @@ struct StatsView: View {
                     ProgressView("Loading risk analysis...")
                 } else if let error = error {
                     ErrorView(message: error)
-                } else if let analysis = riskAnalysis {
+                } else if let _ = riskAnalysis {
                     ScrollView {
                         VStack(spacing: 20) {
                             // Header section
@@ -21,23 +81,93 @@ struct StatsView: View {
                                 Text("Risk Analysis")
                                     .font(.largeTitle)
                                     .bold()
-                                Text("Stored Risk Predictions")
+                                Text("Health Risk Categories")
                                     .font(.subheadline)
                                     .foregroundColor(.gray)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal)
                             
-                            if analysis.formatted_predictions.isEmpty {
-                                Text("No risk predictions available yet.")
-                                    .font(.headline)
-                                    .foregroundColor(.gray)
+                            let (primaryFactors, otherClusters) = categorizedDiseases()
+                            
+                            // Primary Health Factors Section
+                            VStack {
+                                Button(action: {
+                                    withAnimation(.easeInOut(duration: 0.3)) {
+                                        showPrimaryFactors.toggle()
+                                    }
+                                }) {
+                                    HStack {
+                                        Image(systemName: "heart.text.square.fill")
+                                            .foregroundColor(.blue)
+                                        
+                                        Text("Primary Health Factors")
+                                            .font(.headline)
+                                        
+                                        Spacer()
+                                        
+                                        Text("\(primaryFactors.count)")
+                                            .font(.subheadline)
+                                            .foregroundColor(.gray)
+                                        
+                                        Image(systemName: showPrimaryFactors ? "chevron.up" : "chevron.down")
+                                            .foregroundColor(.gray)
+                                            .animation(.easeInOut, value: showPrimaryFactors)
+                                    }
                                     .padding()
-                            } else {
-                                // Risk clusters
-                                ForEach(analysis.formatted_predictions, id: \.cluster_name) { cluster in
-                                    RiskClusterView(cluster: cluster)
+                                    .background(Color(.systemBackground))
+                                    .cornerRadius(10)
+                                    .shadow(color: Color.black.opacity(0.1), radius: 2)
                                 }
+                                
+                                if showPrimaryFactors {
+                                    ForEach(primaryFactors, id: \.cluster_name) { cluster in
+                                        RiskClusterView(cluster: cluster)
+                                    }
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                                }
+                            }
+                            .padding(.horizontal)
+                            
+                            // Other Risk Clusters
+                            if !otherClusters.isEmpty {
+                                VStack {
+                                    Button(action: {
+                                        withAnimation(.easeInOut(duration: 0.3)) {
+                                            showOtherFactors.toggle()
+                                        }
+                                    }) {
+                                        HStack {
+                                            Image(systemName: "list.bullet.circle.fill")
+                                                .foregroundColor(.gray)
+                                            
+                                            Text("Other Risk Factors")
+                                                .font(.headline)
+                                            
+                                            Spacer()
+                                            
+                                            Text("\(otherClusters.count)")
+                                                .font(.subheadline)
+                                                .foregroundColor(.gray)
+                                            
+                                            Image(systemName: showOtherFactors ? "chevron.up" : "chevron.down")
+                                                .foregroundColor(.gray)
+                                                .animation(.easeInOut, value: showOtherFactors)
+                                        }
+                                        .padding()
+                                        .background(Color(.systemBackground))
+                                        .cornerRadius(10)
+                                        .shadow(color: Color.black.opacity(0.1), radius: 2)
+                                    }
+                                    
+                                    if showOtherFactors {
+                                        ForEach(otherClusters, id: \.cluster_name) { cluster in
+                                            RiskClusterView(cluster: cluster)
+                                        }
+                                        .transition(.opacity.combined(with: .move(edge: .top)))
+                                    }
+                                }
+                                .padding(.horizontal)
                             }
                         }
                         .padding(.vertical)
@@ -71,6 +201,45 @@ struct StatsView: View {
         }
         
         isLoading = false
+    }
+}
+
+struct PrimaryFactorRow: View {
+    let title: String
+    let diseases: [Disease]
+    let iconName: String
+    let color: Color
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: iconName)
+                    .foregroundColor(color)
+                Text(title)
+                    .font(.headline)
+                Spacer()
+                Text("\(diseases.count)")
+                    .font(.subheadline)
+                    .foregroundColor(.gray)
+            }
+            
+            if diseases.isEmpty {
+                Text("No diseases in this category")
+                    .font(.subheadline)
+                    .foregroundColor(.gray)
+                    .padding(.vertical, 8)
+            } else {
+                ForEach(diseases, id: \.icd9_code) { disease in
+                    DiseaseRow(disease: disease)
+                }
+            }
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.systemBackground))
+                .shadow(color: Color.black.opacity(0.05), radius: 3)
+        )
     }
 }
 

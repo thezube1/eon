@@ -103,7 +103,7 @@ struct UserNotesResponse: Codable {
 class NetworkManager {
     static let shared = NetworkManager()
     private let baseURL = "https://eon-550878280011.us-central1.run.app/api" // Changed from /api/health to /api
-    
+
     private init() {}
     
     func getSyncStatus(deviceId: String) async throws -> SyncStatus {
