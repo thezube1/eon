@@ -246,12 +246,75 @@ def retrieve_user_metrics(user_id):
                 'timestamp': note_time.strftime('%Y-%m-%d %H:%M:%S UTC'),
                 'note': note['note']
             })
+
+        # Get user characteristics
+        characteristics_response = supabase.table('user_characteristics')\
+            .select('*')\
+            .eq('device_id', device_internal_id)\
+            .single()\
+            .execute()
+
+        characteristics_data = None
+        if characteristics_response.data:
+            char_data = characteristics_response.data
+            # Map biological sex from numeric to string values
+            biological_sex_map = {
+                '2': 'male',
+                '1': 'female',
+                '0': 'undefined'
+            }
+            biological_sex = char_data.get('biological_sex')
+            characteristics_data = {
+                'date_of_birth': char_data.get('date_of_birth'),
+                'biological_sex': biological_sex_map.get(biological_sex, 'undefined'),
+                'blood_type': char_data.get('blood_type'),
+                'last_updated': char_data.get('updated_at')
+            }
+
+        # Get latest body measurements
+        measurements_response = supabase.table('body_measurements')\
+            .select('measurement_type, value, unit, timestamp')\
+            .eq('device_id', device_internal_id)\
+            .order('timestamp', desc=True)\
+            .execute()
+
+        # Process body measurements to get latest value for each type
+        body_measurements = {}
+        if measurements_response.data:
+            for measurement in measurements_response.data:
+                measurement_type = measurement['measurement_type']
+                # Only store if we haven't seen this type yet (since ordered by timestamp desc)
+                if measurement_type not in body_measurements:
+                    body_measurements[measurement_type] = {
+                        'value': measurement['value'],
+                        'unit': measurement['unit'],
+                        'timestamp': measurement['timestamp']
+                    }
+
+        # Calculate BMI if we have both height and weight but no BMI measurement
+        if 'height' in body_measurements and 'weight' in body_measurements and 'bmi' not in body_measurements:
+            try:
+                height_m = float(body_measurements['height']['value'])
+                weight_kg = float(body_measurements['weight']['value'])
+                if height_m > 0:
+                    bmi = weight_kg / (height_m * height_m)
+                    body_measurements['bmi'] = {
+                        'value': round(bmi, 2),
+                        'unit': 'kg/m²',
+                        'timestamp': max(body_measurements['height']['timestamp'],
+                                      body_measurements['weight']['timestamp']),
+                        'calculated': True
+                    }
+            except (ValueError, TypeError) as e:
+                logger.error(f"Error calculating BMI: {str(e)}")
         
         return {
             'heart_rate': heart_rate_stats,
             'steps': steps_response.data,
             'sleep': sleep_data,
             'notes': formatted_notes,
+            'characteristics': characteristics_data,
+            'body_measurements': body_measurements,
             'metadata': {
                 'date': latest_date.date().isoformat(),
                 'device_id': user_id,

@@ -30,11 +30,13 @@ Subjective (S):
 
 Objective (O):
 - List only the measurable health metrics provided
+- Include biological sex if provided in characteristics data
 - For each metric, include only the data points that are available
 - Clearly indicate when data is missing or incomplete
 - Format metrics in clear, readable units (e.g., "Heart Rate: 72 BPM")
 - Present sleep data in hours and minutes
 - Present step counts as whole numbers
+- Present biological sex as "Sex: [value]" at the beginning of the section
 
 Assessment (A):
 - Focus on summarizing the objective findings and recent subjective reports
