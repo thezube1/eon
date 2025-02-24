@@ -264,16 +264,46 @@ def sync_health_data():
         if body_measurements_data:
             logger.info(f"Processing {len(body_measurements_data)} body measurements")
             try:
-                measurement_records = [{
-                    'device_id': device_id,
-                    'timestamp': measurement['timestamp'],
-                    'measurement_type': measurement['measurement_type'],
-                    'value': measurement['value'],
-                    'unit': measurement['unit'],
-                    'source': measurement.get('source')
-                } for measurement in body_measurements_data]
-                
-                supabase.table('body_measurements').insert(measurement_records).execute()
+                for measurement in body_measurements_data:
+                    # First check if we have an existing measurement of this type
+                    existing_measurement = supabase.table('body_measurements')\
+                        .select('id, value')\
+                        .eq('device_id', device_id)\
+                        .eq('measurement_type', measurement['measurement_type'])\
+                        .order('timestamp', desc=True)\
+                        .limit(1)\
+                        .execute()
+
+                    measurement_record = {
+                        'device_id': device_id,
+                        'timestamp': measurement['timestamp'],
+                        'measurement_type': measurement['measurement_type'],
+                        'value': measurement['value'],
+                        'unit': measurement['unit'],
+                        'source': measurement.get('source')
+                    }
+
+                    if existing_measurement.data:
+                        # We have an existing measurement
+                        existing_value = float(existing_measurement.data[0]['value'])
+                        new_value = float(measurement['value'])
+                        
+                        # Only update if the value has changed
+                        if abs(existing_value - new_value) > 0.001:  # Using small epsilon for float comparison
+                            logger.info(f"Updating existing {measurement['measurement_type']} measurement from {existing_value} to {new_value}")
+                            supabase.table('body_measurements')\
+                                .update(measurement_record)\
+                                .eq('id', existing_measurement.data[0]['id'])\
+                                .execute()
+                        else:
+                            logger.info(f"Skipping {measurement['measurement_type']} measurement as value hasn't changed")
+                    else:
+                        # No existing measurement of this type, insert new record
+                        logger.info(f"Inserting new {measurement['measurement_type']} measurement")
+                        supabase.table('body_measurements')\
+                            .insert(measurement_record)\
+                            .execute()
+
                 logger.info("Successfully processed body measurements data")
             except Exception as e:
                 logger.error(f"Error processing body measurements: {str(e)}", exc_info=True)
