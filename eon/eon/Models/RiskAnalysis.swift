@@ -25,6 +25,7 @@ struct RiskAnalysisResponse: Codable {
     let metrics_summary: String?
     let soap_note: String?
     let predictions: [Prediction]
+    let recommendation_counts: [String: Int]?
     
     var riskLevelColor: (String) -> Color {
         return { level in

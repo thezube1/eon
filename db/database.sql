@@ -84,3 +84,36 @@ CREATE TABLE IF NOT EXISTS risk_analysis_predictions (
     diseases JSONB NOT NULL, -- Array of objects with icd9_code and description
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Table for storing user characteristics (immutable/rarely changing data)
+CREATE TABLE IF NOT EXISTS user_characteristics (
+    id SERIAL PRIMARY KEY,
+    device_id INTEGER REFERENCES devices(id) NOT NULL,
+    date_of_birth DATE,
+    biological_sex VARCHAR(20),
+    blood_type VARCHAR(10),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(device_id)  -- One record per device
+);
+
+-- Table for storing body measurements (mutable/time-series data)
+CREATE TABLE IF NOT EXISTS body_measurements (
+    id SERIAL PRIMARY KEY,
+    device_id INTEGER REFERENCES devices(id) NOT NULL,
+    timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+    measurement_type VARCHAR(50) NOT NULL,  -- 'weight', 'height', 'bmi'
+    value DECIMAL(8,3) NOT NULL,
+    unit VARCHAR(20) NOT NULL,
+    source VARCHAR(100),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT valid_measurement CHECK (value > 0)
+);
+
+-- Add new metric types to sync_status
+ALTER TABLE sync_status
+    DROP CONSTRAINT IF EXISTS sync_status_metric_type_check;
+
+ALTER TABLE sync_status
+    ADD CONSTRAINT sync_status_metric_type_check 
+    CHECK (metric_type IN ('heart_rate', 'steps', 'sleep', 'characteristics', 'body_measurements'));

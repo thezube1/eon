@@ -11,21 +11,21 @@ struct StatsView: View {
     @State private var showOtherFactors = false
     
     // Helper function to categorize diseases
-    private func categorizedDiseases() -> (primary: [RiskCluster], other: [RiskCluster]) {
-        guard let analysis = riskAnalysis else { return ([], []) }
+    private func categorizedDiseases() -> (primary: [RiskCluster], other: [RiskCluster], recommendationCounts: [String: Int]) {
+        guard let analysis = riskAnalysis else { return ([], [], [:]) }
         
         var primaryClusters: [RiskCluster] = []
         var otherClusters: [RiskCluster] = []
         var processedDiseases: Set<String> = []
         
         // First, create primary clusters
-        let primaryCategories = ["Cardiovascular", "Sleep", "Endocrine"]
+        let primaryCategories = ["Cardiovascular", "Sleep", "Metabolic"]
         
         // Initialize empty clusters for each category
         var primaryClustersDict: [String: [Disease]] = [
             "Cardiovascular": [],
             "Sleep": [],
-            "Endocrine": []
+            "Metabolic": []
         ]
         
         // Get recommendation counts from the response
@@ -59,10 +59,10 @@ struct StatsView: View {
                 } else if description.contains("diabetes") || 
                           description.contains("thyroid") || 
                           description.contains("hormone") ||
-                          clusterName.contains("endocrine") ||
-                          clusterName.contains("metabolic") {
+                          clusterName.contains("metabolic") ||
+                          clusterName.contains("endocrine") {
                     if !processedDiseases.contains(disease.icd9_code) {
-                        primaryClustersDict["Endocrine"]?.append(disease)
+                        primaryClustersDict["Metabolic"]?.append(disease)
                         processedDiseases.insert(disease.icd9_code)
                     }
                 }
@@ -75,20 +75,23 @@ struct StatsView: View {
             
             // Find the original cluster that had the most diseases from this category
             var originalRiskLevel = "Medium Risk" // default fallback
+            var originalExplanation = "Primary health factors related to \(category.lowercased()) conditions" // default fallback
+            
             if let matchingCluster = analysis.formatted_predictions.first(where: { cluster in
                 let clusterName = cluster.cluster_name.lowercased()
                 return clusterName.contains(category.lowercased()) ||
                        (category == "Cardiovascular" && (clusterName.contains("cardio") || clusterName.contains("heart") || clusterName.contains("vascular"))) ||
                        (category == "Sleep" && clusterName.contains("sleep")) ||
-                       (category == "Endocrine" && (clusterName.contains("endocrine") || clusterName.contains("metabolic")))
+                       (category == "Metabolic" && (clusterName.contains("metabolic") || clusterName.contains("endocrine")))
             }) {
                 originalRiskLevel = matchingCluster.risk_level
+                originalExplanation = matchingCluster.explanation
             }
             
             return RiskCluster(
                 cluster_name: category,
                 diseases: diseases,
-                explanation: "Primary health factors related to \(category.lowercased()) conditions",
+                explanation: originalExplanation,
                 risk_level: originalRiskLevel
             )
         }
@@ -106,11 +109,11 @@ struct StatsView: View {
             )
         }
         
-        return (primaryClusters, otherClusters)
+        return (primaryClusters, otherClusters, recommendationCounts)
     }
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             Group {
                 if isLoading {
                     ProgressView("Loading risk analysis...")
@@ -131,7 +134,7 @@ struct StatsView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal)
                             
-                            let (primaryFactors, otherClusters) = categorizedDiseases()
+                            let (primaryFactors, otherClusters, recommendationCounts) = categorizedDiseases()
                             
                             // Primary Health Factors Section
                             VStack {
@@ -165,7 +168,10 @@ struct StatsView: View {
                                 
                                 if showPrimaryFactors {
                                     ForEach(primaryFactors, id: \.cluster_name) { cluster in
-                                        RiskClusterView(cluster: cluster, recommendationCount: recommendationCounts[cluster.cluster_name] ?? 0)
+                                        RiskClusterView(
+                                            cluster: cluster,
+                                            recommendationCount: recommendationCounts[cluster.cluster_name] ?? 0
+                                        )
                                     }
                                     .transition(.opacity.combined(with: .move(edge: .top)))
                                 }
@@ -205,7 +211,10 @@ struct StatsView: View {
                                     
                                     if showOtherFactors {
                                         ForEach(otherClusters, id: \.cluster_name) { cluster in
-                                            RiskClusterView(cluster: cluster, recommendationCount: recommendationCounts[cluster.cluster_name] ?? 0)
+                                            RiskClusterView(
+                                                cluster: cluster,
+                                                recommendationCount: recommendationCounts[cluster.cluster_name] ?? 0
+                                            )
                                         }
                                         .transition(.opacity.combined(with: .move(edge: .top)))
                                     }
@@ -289,16 +298,39 @@ struct PrimaryFactorRow: View {
 struct RiskClusterView: View {
     let cluster: RiskCluster
     let recommendationCount: Int
+    @State private var showRecommendations = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Cluster header
-            HStack {
-                Text(cluster.cluster_name)
-                    .font(.title2)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(cluster.cluster_name)
+                        .font(.title2)
+                        .bold()
+                    Spacer()
+                    // Recommendation count
+                    if recommendationCount > 0 {
+                        HStack(spacing: 4) {
+                            Text("\(recommendationCount) \(recommendationCount == 1 ? "recommendation" : "recommendations")")
+                                .font(.caption)
+                                .bold()
+                            Image(systemName: "arrow.forward.circle.fill")
+                                .font(.system(size: 12))
+                        }
+                        .foregroundColor(.primary)
+                    }
+                }
+                
+                // Risk level badge
+                Text(cluster.risk_level)
+                    .font(.caption)
                     .bold()
-                Spacer()
-                RiskLevelBadge(riskLevel: cluster.risk_level, recommendationCount: recommendationCount)
+                    .foregroundColor(riskLevelColor(for: cluster.risk_level))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(riskLevelColor(for: cluster.risk_level).opacity(0.2))
+                    .clipShape(Capsule())
             }
             
             // Diseases
@@ -319,6 +351,27 @@ struct RiskClusterView: View {
                 .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: 2)
         )
         .padding(.horizontal)
+        .onTapGesture {
+            if recommendationCount > 0 {
+                showRecommendations = true
+            }
+        }
+        .navigationDestination(isPresented: $showRecommendations) {
+            RecsView(focusedCluster: cluster.cluster_name)
+        }
+    }
+    
+    private func riskLevelColor(for level: String) -> Color {
+        switch level.lowercased() {
+        case "high risk":
+            return .red
+        case "medium risk":
+            return .orange
+        case "low risk":
+            return .green
+        default:
+            return .gray
+        }
     }
 }
 
@@ -373,28 +426,32 @@ struct RiskLevelBadge: View {
     
     var body: some View {
         HStack(spacing: 8) {
+            // Risk level bubble
             Text(riskLevel)
                 .font(.caption)
                 .bold()
+                .foregroundColor(textColor)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(backgroundColor)
+                .clipShape(Capsule())
             
+            // Recommendation count
             if recommendationCount > 0 {
                 Text("•")
                     .font(.caption)
+                    .foregroundColor(.secondary)
                 
-                HStack(spacing: 2) {
-                    Text("\(recommendationCount)")
+                HStack(spacing: 4) {
+                    Text("\(recommendationCount) \(recommendationCount == 1 ? "rec" : "recs")")
                         .font(.caption)
                         .bold()
-                    Image(systemName: "list.bullet")
-                        .font(.caption)
+                    Image(systemName: "arrow.forward.circle.fill")
+                        .font(.system(size: 12))
                 }
+                .foregroundColor(.primary)
             }
         }
-        .foregroundColor(textColor)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(backgroundColor)
-        .clipShape(Capsule())
     }
 }
 

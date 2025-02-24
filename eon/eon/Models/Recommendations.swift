@@ -6,6 +6,7 @@ struct Recommendation: Codable, Identifiable {
     let explanation: String
     let frequency: String
     let accepted: Bool?
+    let risk_cluster: String?
     
     var identifiableId: Int {
         return id ?? -1

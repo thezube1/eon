@@ -30,7 +30,7 @@ struct OnboardingView: View {
                     .font(.largeTitle)
                     .bold()
 
-                Text("We'd like to connect with Apple Health to track your steps, heart rate, and sleep.")
+                Text("We'd like to connect with Apple Health to track your steps, heart rate, sleep, and other health metrics like weight, height, and basic health information to provide you with better personalized recommendations.")
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 30)
 

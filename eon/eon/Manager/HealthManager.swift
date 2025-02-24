@@ -23,6 +23,14 @@ class HealthManager: ObservableObject {
     @Published var sleepHours: Double = 0.0
     @Published var heartRate: Double = 0.0
     
+    // Add properties for new metrics
+    @Published var dateOfBirth: Date?
+    @Published var biologicalSex: HKBiologicalSex = .notSet
+    @Published var bloodType: HKBloodType = .notSet
+    @Published var bodyMass: Double?
+    @Published var height: Double?
+    @Published var bmi: Double?
+    
     // Add state to track background tasks
     private var backgroundTask: Task<Void, Never>?
     private var hasRunInitialAnalysis = false
@@ -46,6 +54,8 @@ class HealthManager: ObservableObject {
 
     private var readTypes: Set<HKObjectType> {
         var types = Set<HKObjectType>()
+        
+        // Existing metrics
         if let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount) {
             types.insert(stepType)
         }
@@ -55,6 +65,26 @@ class HealthManager: ObservableObject {
         if let sleepType = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) {
             types.insert(sleepType)
         }
+        
+        // Additional characteristics
+        let characteristicTypes: [HKCharacteristicType] = [
+            .characteristicType(forIdentifier: .dateOfBirth)!,
+            .characteristicType(forIdentifier: .bloodType)!,
+            .characteristicType(forIdentifier: .biologicalSex)!
+        ]
+        types.formUnion(characteristicTypes)
+        
+        // Body measurements
+        if let bodyMassType = HKQuantityType.quantityType(forIdentifier: .bodyMass) {
+            types.insert(bodyMassType)
+        }
+        if let heightType = HKQuantityType.quantityType(forIdentifier: .height) {
+            types.insert(heightType)
+        }
+        if let bmiType = HKQuantityType.quantityType(forIdentifier: .bodyMassIndex) {
+            types.insert(bmiType)
+        }
+        
         return types
     }
 
@@ -85,6 +115,8 @@ class HealthManager: ObservableObject {
         fetchStepCount()
         fetchHeartRate()
         fetchSleepHours()
+        fetchCharacteristics()
+        fetchBodyMeasurements()
     }
 
     private func fetchStepCount() {
@@ -217,6 +249,92 @@ class HealthManager: ObservableObject {
                    healthData["sleep"] = sleepData
                }
            }
+
+           // Add characteristics data
+           do {
+               var characteristics: [String: Any] = [:]
+               let dateFormatter = ISO8601DateFormatter()
+               
+               // Date of Birth - handle as optional
+               do {
+                   let dobComponents = try healthStore.dateOfBirthComponents()
+                   if let date = Calendar.current.date(from: dobComponents) {
+                       characteristics["date_of_birth"] = dateFormatter.string(from: date)
+                   }
+               } catch {
+                   print("Error fetching date of birth: \(error)")
+               }
+               
+               // Biological Sex - handle as optional
+               do {
+                   let biologicalSex = try healthStore.biologicalSex().biologicalSex
+                   characteristics["biological_sex"] = biologicalSex.rawValue
+               } catch {
+                   print("Error fetching biological sex: \(error)")
+               }
+               
+               // Blood Type - handle as optional
+               do {
+                   let bloodType = try healthStore.bloodType().bloodType
+                   characteristics["blood_type"] = bloodType.rawValue
+               } catch {
+                   print("Error fetching blood type: \(error)")
+               }
+               
+               // Only add characteristics if we have at least one value
+               if !characteristics.isEmpty {
+                   healthData["characteristics"] = [characteristics]
+               }
+           } catch {
+               print("Error processing characteristics: \(error)")
+           }
+           
+           // Add body measurements data
+           var bodyMeasurements: [[String: Any]] = []
+           let timestamp = ISO8601DateFormatter().string(from: Date())
+           
+           // Body Mass
+           if let bodyMassType = HKQuantityType.quantityType(forIdentifier: .bodyMass),
+              let latestWeight = try? await fetchLatestQuantitySample(for: bodyMassType) {
+               let measurement: [String: Any] = [
+                   "timestamp": timestamp,
+                   "measurement_type": "weight",
+                   "value": latestWeight.quantity.doubleValue(for: HKUnit.gramUnit(with: .kilo)),
+                   "unit": "kg",
+                   "source": latestWeight.sourceRevision.source.name
+               ]
+               bodyMeasurements.append(measurement)
+           }
+           
+           // Height
+           if let heightType = HKQuantityType.quantityType(forIdentifier: .height),
+              let latestHeight = try? await fetchLatestQuantitySample(for: heightType) {
+               let measurement: [String: Any] = [
+                   "timestamp": timestamp,
+                   "measurement_type": "height",
+                   "value": latestHeight.quantity.doubleValue(for: HKUnit.meter()),
+                   "unit": "m",
+                   "source": latestHeight.sourceRevision.source.name
+               ]
+               bodyMeasurements.append(measurement)
+           }
+           
+           // BMI
+           if let bmiType = HKQuantityType.quantityType(forIdentifier: .bodyMassIndex),
+              let latestBMI = try? await fetchLatestQuantitySample(for: bmiType) {
+               let measurement: [String: Any] = [
+                   "timestamp": timestamp,
+                   "measurement_type": "bmi",
+                   "value": latestBMI.quantity.doubleValue(for: HKUnit.count()),
+                   "unit": "count",
+                   "source": latestBMI.sourceRevision.source.name
+               ]
+               bodyMeasurements.append(measurement)
+           }
+           
+           if !bodyMeasurements.isEmpty {
+               healthData["body_measurements"] = bodyMeasurements
+           }
            
            // Only sync if we have data to sync
            if !healthData.isEmpty {
@@ -232,6 +350,25 @@ class HealthManager: ObservableObject {
            }
        } catch {
            print("Error syncing with server: \(error)")
+       }
+   }
+   
+   // Helper function to fetch latest quantity sample
+   private func fetchLatestQuantitySample(for quantityType: HKQuantityType) async throws -> HKQuantitySample? {
+       return try await withCheckedThrowingContinuation { continuation in
+           let query = HKSampleQuery(
+               sampleType: quantityType,
+               predicate: nil,
+               limit: 1,
+               sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)]
+           ) { _, samples, error in
+               if let error = error {
+                   continuation.resume(throwing: error)
+                   return
+               }
+               continuation.resume(returning: samples?.first as? HKQuantitySample)
+           }
+           healthStore.execute(query)
        }
    }
    
@@ -621,7 +758,7 @@ class HealthManager: ObservableObject {
     }
     
     // Add function to run analysis and recommendations
-    private func runAnalysisAndRecommendations() async {
+    func runAnalysisAndRecommendations() async {
         do {
             print("Starting risk analysis calculation...")
             // First run risk analysis
@@ -645,6 +782,80 @@ class HealthManager: ObservableObject {
             if let urlError = error as? URLError {
                 print("URL Error details: \(urlError.localizedDescription)")
             }
+        }
+    }
+
+    private func fetchCharacteristics() {
+        do {
+            // Date of Birth
+            let dateOfBirth = try healthStore.dateOfBirthComponents()
+            let calendar = Calendar.current
+            if let date = calendar.date(from: dateOfBirth) {
+                DispatchQueue.main.async {
+                    self.dateOfBirth = date
+                }
+            }
+            
+            // Biological Sex
+            let biologicalSex = try healthStore.biologicalSex().biologicalSex
+            DispatchQueue.main.async {
+                self.biologicalSex = biologicalSex
+            }
+            
+            // Blood Type
+            let bloodType = try healthStore.bloodType().bloodType
+            DispatchQueue.main.async {
+                self.bloodType = bloodType
+            }
+        } catch {
+            print("Error fetching characteristics: \(error)")
+        }
+    }
+    
+    private func fetchBodyMeasurements() {
+        // Fetch Body Mass
+        if let bodyMassType = HKQuantityType.quantityType(forIdentifier: .bodyMass) {
+            let query = HKSampleQuery(sampleType: bodyMassType,
+                                    predicate: nil,
+                                    limit: 1,
+                                    sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)]) { [weak self] _, samples, error in
+                if let sample = samples?.first as? HKQuantitySample {
+                    DispatchQueue.main.async {
+                        self?.bodyMass = sample.quantity.doubleValue(for: HKUnit.gramUnit(with: .kilo))
+                    }
+                }
+            }
+            healthStore.execute(query)
+        }
+        
+        // Fetch Height
+        if let heightType = HKQuantityType.quantityType(forIdentifier: .height) {
+            let query = HKSampleQuery(sampleType: heightType,
+                                    predicate: nil,
+                                    limit: 1,
+                                    sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)]) { [weak self] _, samples, error in
+                if let sample = samples?.first as? HKQuantitySample {
+                    DispatchQueue.main.async {
+                        self?.height = sample.quantity.doubleValue(for: HKUnit.meter())
+                    }
+                }
+            }
+            healthStore.execute(query)
+        }
+        
+        // Fetch BMI
+        if let bmiType = HKQuantityType.quantityType(forIdentifier: .bodyMassIndex) {
+            let query = HKSampleQuery(sampleType: bmiType,
+                                    predicate: nil,
+                                    limit: 1,
+                                    sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)]) { [weak self] _, samples, error in
+                if let sample = samples?.first as? HKQuantitySample {
+                    DispatchQueue.main.async {
+                        self?.bmi = sample.quantity.doubleValue(for: HKUnit.count())
+                    }
+                }
+            }
+            healthStore.execute(query)
         }
     }
 }

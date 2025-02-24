@@ -8,11 +8,15 @@ struct HealthMetrics: Codable {
     let heartRate: HeartRateData?
     let steps: StepData?
     let sleep: SleepData?
+    let characteristics: CharacteristicsData?
+    let bodyMeasurements: [BodyMeasurementData]?
     
     enum CodingKeys: String, CodingKey {
         case heartRate = "heart_rate"
         case steps
         case sleep
+        case characteristics
+        case bodyMeasurements = "body_measurements"
     }
 }
 
@@ -49,6 +53,34 @@ struct SleepData: Codable {
     }
 }
 
+struct CharacteristicsData: Codable {
+    let dateOfBirth: String?
+    let biologicalSex: Int?
+    let bloodType: Int?
+    
+    enum CodingKeys: String, CodingKey {
+        case dateOfBirth = "date_of_birth"
+        case biologicalSex = "biological_sex"
+        case bloodType = "blood_type"
+    }
+}
+
+struct BodyMeasurementData: Codable {
+    let timestamp: String
+    let measurementType: String
+    let value: Double
+    let unit: String
+    let source: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case timestamp
+        case measurementType = "measurement_type"
+        case value
+        case unit
+        case source
+    }
+}
+
 struct SyncStatus: Codable {
     let syncStatus: SyncTimes
     let lastSync: String?
@@ -74,11 +106,15 @@ struct SyncTimes: Codable {
     let heartRate: String?
     let steps: String?
     let sleep: String?
+    let characteristics: String?
+    let bodyMeasurements: String?
     
     enum CodingKeys: String, CodingKey {
         case heartRate = "heart_rate"
         case steps
         case sleep
+        case characteristics
+        case bodyMeasurements = "body_measurements"
     }
 }
 
@@ -118,7 +154,9 @@ class NetworkManager {
                     syncStatus: SyncTimes(
                         heartRate: nil as String?,
                         steps: nil as String?,
-                        sleep: nil as String?
+                        sleep: nil as String?,
+                        characteristics: nil as String?,
+                        bodyMeasurements: nil as String?
                     ),
                     lastSync: nil as String?
                 )
@@ -154,7 +192,13 @@ class NetworkManager {
         var bodyDict = healthData
         bodyDict["device_info"] = deviceInfo
         
-        request.httpBody = try JSONSerialization.data(withJSONObject: bodyDict)
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: bodyDict)
+            print("Request body: \(String(data: request.httpBody!, encoding: .utf8) ?? "")")
+        } catch {
+            print("Error serializing request body: \(error)")
+            throw error
+        }
         
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -234,7 +278,8 @@ class NetworkManager {
             formatted_predictions: rawResponse.predictions,
             metrics_summary: nil,  // These fields aren't needed when getting from DB
             soap_note: nil,
-            predictions: []  // Raw predictions aren't needed when getting from DB
+            predictions: [],  // Raw predictions aren't needed when getting from DB
+            recommendation_counts: rawResponse.recommendation_counts
         )
     }
     
@@ -347,4 +392,5 @@ enum NetworkError: Error {
 private struct RawRiskAnalysisResponse: Codable {
     let device_id: String
     let predictions: [RiskCluster]
+    let recommendation_counts: [String: Int]?
 }

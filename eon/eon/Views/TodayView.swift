@@ -43,6 +43,10 @@ struct TodayView: View {
     
     // Tab selection
     @State private var selectedTab = 0
+    @AppStorage("lastCheckInTime") private var lastCheckInTime: Double = 0
+    @State private var showCheckInModal = false
+    @State private var checkInText = ""
+    @FocusState private var isCheckInFocused: Bool
     
     // Existing states you might already have
     @State private var currentTime = Date()
@@ -68,6 +72,48 @@ struct TodayView: View {
     private let hapticFeedback = UIImpactFeedbackGenerator(style: .light)
     private let minimumHapticInterval: TimeInterval = 1.0 / 32.0 // 32Hz rate limit
     
+    // Check if we need to show the check-in modal
+    private func shouldShowCheckIn() -> Bool {
+        let twelveHoursInSeconds: TimeInterval = 12 * 60 * 60
+        let timeSinceLastCheckIn = Date().timeIntervalSince1970 - lastCheckInTime
+        return timeSinceLastCheckIn >= twelveHoursInSeconds
+    }
+    
+    private func submitCheckIn() {
+        guard !checkInText.isEmpty else { return }
+        
+        Task {
+            do {
+                if let deviceId = UIDevice.current.identifierForVendor?.uuidString {
+                    try await NetworkManager.shared.createNote(deviceId: deviceId, note: checkInText)
+                    
+                    // Update last check-in time and dismiss modal
+                    DispatchQueue.main.async {
+                        lastCheckInTime = Date().timeIntervalSince1970
+                        checkInText = ""
+                        showCheckInModal = false
+                        showConfirmation = true
+                        
+                        // Dismiss confirmation after 3 seconds
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            withAnimation {
+                                showConfirmation = false
+                            }
+                        }
+                    }
+                    
+                    // Refresh notes after successful check-in
+                    await loadNotes()
+                    
+                    // Trigger risk analysis and recommendations
+                    await healthManager.runAnalysisAndRecommendations()
+                }
+            } catch {
+                print("Error saving check-in: \(error)")
+            }
+        }
+    }
+    
     var body: some View {
         TabView(selection: $selectedTab) {
             mainContent
@@ -77,7 +123,6 @@ struct TodayView: View {
                     Text("Today")
                 }
                 .refreshable {
-                    // Allow pull-to-refresh to sync and update segments
                     await healthManager.syncWithServer()
                     healthManager.dailySegments { newSegments in
                         self.segments = newSegments
@@ -99,6 +144,7 @@ struct TodayView: View {
                 }
         }
         .onAppear {
+            showCheckInModal = shouldShowCheckIn()
             print("TodayView appeared - Starting data load")
             healthManager.dailySegments { newSegments in
                 self.segments = newSegments
@@ -106,7 +152,6 @@ struct TodayView: View {
             healthManager.fetchAllHealthData()
             startTimer()
             
-            // Initial notes load
             Task {
                 print("Starting initial loadNotes() task")
                 await loadNotes()
@@ -116,6 +161,83 @@ struct TodayView: View {
             print("Timer triggered - refreshing notes")
             Task {
                 await loadNotes()
+            }
+        }
+        .overlay {
+            if showCheckInModal {
+                // Semi-transparent background
+                Color.black.opacity(0.6)
+                    .ignoresSafeArea()
+                
+                // Check-in modal
+                VStack(spacing: 20) {
+                    Text("How are you feeling?")
+                        .font(.title2)
+                        .bold()
+                        .foregroundColor(.primary)
+                    
+                    Text("Please take a moment to check in - you can continue using the app afterwards")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                    
+                    TextEditor(text: $checkInText)
+                        .frame(height: 100)
+                        .padding(8)
+                        .background(Color(.systemBackground))
+                        .cornerRadius(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                        )
+                        .focused($isCheckInFocused)
+                    
+                    Button(action: submitCheckIn) {
+                        Text("Submit")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .background(
+                                checkInText.isEmpty ?
+                                Color.gray :
+                                Color.black
+                            )
+                            .cornerRadius(12)
+                    }
+                    .disabled(checkInText.isEmpty)
+                }
+                .padding(24)
+                .background(Color(.systemBackground))
+                .cornerRadius(16)
+                .shadow(radius: 20)
+                .padding(.horizontal, 24)
+                .transition(.opacity.combined(with: .scale))
+                .onAppear {
+                    isCheckInFocused = true
+                }
+            }
+            
+            if showConfirmation {
+                VStack {
+                    Text("Thanks for checking in!")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .padding()
+                        .background(
+                            Capsule()
+                                .fill(Color.black)
+                                .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+                        )
+                }
+                .transition(.opacity.combined(with: .scale))
+                .animation(.easeInOut, value: showConfirmation)
+            }
+        }
+        .onChange(of: selectedTab) { oldValue, newValue in
+            // Prevent tab navigation if check-in is required
+            if showCheckInModal {
+                selectedTab = 0
             }
         }
     }
@@ -191,6 +313,9 @@ struct TodayView: View {
                         }
                     }
                 }
+                
+                // Trigger risk analysis and recommendations
+                await healthManager.runAnalysisAndRecommendations()
                 
             } catch {
                 print("Error saving note: \(error)")
@@ -290,8 +415,9 @@ struct TodayView: View {
         GeometryReader { screenGeo in
             VStack(spacing: 0) { // Set spacing to 0 for main VStack
                 Spacer()
+                    .frame(height: 20) // Add minimal top spacing
                 
-                VStack(spacing: 16) { // Add VStack with controlled spacing
+                VStack(spacing: 2) { // Reduced spacing from 4 to 2 for more compact layout
                     // Greeting or tapped category text
                     Text(
                         selectedCategory == nil
@@ -300,37 +426,42 @@ struct TodayView: View {
                     )
                     .font(.largeTitle)
                     .bold()
+                    .padding(.bottom, 2) // Reduced padding from 4 to 2
                     
-                    // Time display below greeting
-                    HStack(spacing: 12) {
+                    // Fixed height container for time display
+                    ZStack(alignment: .center) {
+                        // Time display below greeting
                         if selectedTime != nil {
-                            Text(timeString(for: selectedTime!))
-                                .font(.title2)
-                                .foregroundColor(.gray)
-                                .transition(.opacity)
-                            
-                            Button(action: {
-                                withAnimation {
-                                    selectedTime = nil
-                                    selectedCategory = nil
+                            HStack(spacing: 12) {
+                                Text(timeString(for: selectedTime!))
+                                    .font(.title2)
+                                    .foregroundColor(.gray)
+                                    .transition(.move(edge: .leading).combined(with: .opacity))
+                                
+                                Button(action: {
+                                    withAnimation {
+                                        selectedTime = nil
+                                        selectedCategory = nil
+                                    }
+                                }) {
+                                    Text("Reset")
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.white)
+                                        .frame(height: 28)
+                                        .padding(.horizontal, 8)
+                                        .background(
+                                            Capsule()
+                                                .fill(Color.black)
+                                        )
                                 }
-                            }) {
-                                Text("Reset")
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(.white)
-                                    .frame(height: 28)
-                                    .padding(.horizontal, 8)
-                                    .background(
-                                        Capsule()
-                                            .fill(Color.black)
-                                    )
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
                             }
-                            .transition(.opacity.combined(with: .scale))
                         }
                     }
-                    .frame(height: selectedTime != nil ? 40 : 0) // Collapse height when no time selected
-                    .animation(.easeInOut, value: selectedTime)
+                    .frame(height: 28) // Reduced from 32 to 28 for more compact layout
+                    .animation(.spring(response: 0.4, dampingFraction: 0.8), value: selectedTime)
+                    .padding(.bottom, 2) // Reduced padding from 4 to 2
                 }
                 
                 // Health bar geometry
@@ -525,22 +656,6 @@ struct TodayView: View {
                     .onAppear {
                         isNoteFieldFocused = true
                     }
-                }
-                
-                if showConfirmation {
-                    VStack {
-                        Text("Thanks for checking in!")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .padding()
-                            .background(
-                                Capsule()
-                                    .fill(Color.black)
-                                    .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
-                            )
-                    }
-                    .transition(.opacity.combined(with: .scale))
-                    .animation(.easeInOut, value: showConfirmation)
                 }
             }
         }

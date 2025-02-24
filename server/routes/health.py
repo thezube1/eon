@@ -212,7 +212,6 @@ def sync_health_data():
 
                 if step_records:
                     logger.info(f"Upserting {len(step_records)} step records")
-                    # Use ON CONFLICT DO UPDATE
                     result = supabase.table('step_counts').upsert(
                         step_records,
                         on_conflict='device_id,date'
@@ -223,7 +222,6 @@ def sync_health_data():
 
             except Exception as e:
                 logger.error(f"Error upserting step data: {str(e)}", exc_info=True)
-                # Continue processing other data even if steps fail
                 pass
 
         # Process sleep data
@@ -238,6 +236,47 @@ def sync_health_data():
             } for record in sleep_data]
             logger.info(f"Inserting {len(sleep_records)} sleep records")
             supabase.table('sleep_records').insert(sleep_records).execute()
+
+        # Process characteristics data
+        characteristics_data = data.get('characteristics', [])
+        if characteristics_data and len(characteristics_data) > 0:
+            char_data = characteristics_data[0]  # Get the first (and should be only) record
+            logger.info("Processing characteristics data")
+            try:
+                # Use upsert to handle both insert and update cases
+                char_record = {
+                    'device_id': device_id,
+                    'date_of_birth': char_data.get('date_of_birth'),
+                    'biological_sex': char_data.get('biological_sex'),
+                    'blood_type': char_data.get('blood_type'),
+                    'updated_at': datetime.utcnow().isoformat()
+                }
+                supabase.table('user_characteristics').upsert(
+                    char_record,
+                    on_conflict='device_id'
+                ).execute()
+                logger.info("Successfully processed characteristics data")
+            except Exception as e:
+                logger.error(f"Error processing characteristics data: {str(e)}", exc_info=True)
+
+        # Process body measurements data
+        body_measurements_data = data.get('body_measurements', [])
+        if body_measurements_data:
+            logger.info(f"Processing {len(body_measurements_data)} body measurements")
+            try:
+                measurement_records = [{
+                    'device_id': device_id,
+                    'timestamp': measurement['timestamp'],
+                    'measurement_type': measurement['measurement_type'],
+                    'value': measurement['value'],
+                    'unit': measurement['unit'],
+                    'source': measurement.get('source')
+                } for measurement in body_measurements_data]
+                
+                supabase.table('body_measurements').insert(measurement_records).execute()
+                logger.info("Successfully processed body measurements data")
+            except Exception as e:
+                logger.error(f"Error processing body measurements: {str(e)}", exc_info=True)
 
         # Update sync status
         current_time = datetime.utcnow().isoformat()
@@ -261,6 +300,18 @@ def sync_health_data():
                 'metric_type': 'sleep',
                 'last_sync_time': current_time
             })
+        if characteristics_data:
+            sync_records.append({
+                'device_id': device_id,
+                'metric_type': 'characteristics',
+                'last_sync_time': current_time
+            })
+        if body_measurements_data:
+            sync_records.append({
+                'device_id': device_id,
+                'metric_type': 'body_measurements',
+                'last_sync_time': current_time
+            })
 
         if sync_records:
             logger.info(f"Updating sync status for {len(sync_records)} metrics")
@@ -275,7 +326,9 @@ def sync_health_data():
             'metrics_synced': {
                 'heart_rate': len(heart_rate_data),
                 'steps': len(step_data),
-                'sleep': len(sleep_data)
+                'sleep': len(sleep_data),
+                'characteristics': len(characteristics_data),
+                'body_measurements': len(body_measurements_data)
             }
         })
 
