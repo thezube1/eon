@@ -51,10 +51,10 @@ def generate_recommendations(soap_note: str, formatted_predictions: list, past_r
     
     # Map risk levels to numeric values for calculation
     risk_level_weights = {
-        "low": 1,
-        "moderate": 2,
-        "medium": 2,
-        "high": 3
+        "Low Risk": 1,
+        "Medium Risk": 2,
+        "Moderate Risk": 2,
+        "High Risk": 3
     }
     
     # Analyze predictions to determine recommendation counts
