@@ -16,6 +16,14 @@ logger = logging.getLogger(__name__)
 # Create Blueprint
 recommendations_bp = Blueprint('recommendations', __name__)
 
+# Initialize Supabase client
+try:
+    supabase = init_supabase()
+    logger.info("Supabase client initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize Supabase client: {str(e)}", exc_info=True)
+    raise
+
 def generate_recommendations(soap_note: str, formatted_predictions: list, past_recommendations: dict = None) -> str:
     """
     Generate personalized health recommendations using Gemini model.
