@@ -88,6 +88,7 @@ def store_recommendations(device_id: str, recommendations: dict) -> bool:
                     'recommendation': rec['recommendation'],
                     'explanation': rec['explanation'],
                     'frequency': rec['frequency'],
+                    'risk_cluster': rec.get('risk_cluster', None),  # Store the risk cluster if provided
                     'accepted': False  # New recommendations start as unaccepted
                 }
                 

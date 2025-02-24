@@ -278,6 +278,18 @@ def get_risk_analysis(device_id):
                 'predictions': []
             })
             
+        # Get all recommendations for this device
+        recommendations_response = supabase.table('recommendations')\
+            .select('*')\
+            .eq('device_id', device_internal_id)\
+            .execute()
+            
+        # Count recommendations per cluster
+        cluster_recommendation_counts = {}
+        for rec in recommendations_response.data:
+            if rec['risk_cluster']:
+                cluster_recommendation_counts[rec['risk_cluster']] = cluster_recommendation_counts.get(rec['risk_cluster'], 0) + 1
+            
         # Group predictions by cluster, keeping the most recent entry for each cluster
         clusters = {}
         for prediction in predictions_response.data:
@@ -285,13 +297,16 @@ def get_risk_analysis(device_id):
             # Always take the most recent prediction for each cluster
             if cluster_name not in clusters:
                 clusters[cluster_name] = prediction
+                # Add recommendation count to the prediction data
+                clusters[cluster_name]['recommendation_count'] = cluster_recommendation_counts.get(cluster_name, 0)
                 
         # Convert to list and format response
         formatted_predictions = list(clusters.values())
         
         return jsonify({
             'device_id': device_id,
-            'predictions': formatted_predictions
+            'predictions': formatted_predictions,
+            'recommendation_counts': cluster_recommendation_counts  # Include total counts in response
         })
         
     except Exception as e:

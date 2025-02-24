@@ -124,36 +124,40 @@ Your task is to:
         {{
             "recommendation": "string",
             "explanation": "string",
-            "frequency": "string"
+            "frequency": "string",
+            "risk_cluster": "string"
         }}
     ],
     "Steps": [
         {{
             "recommendation": "string",
             "explanation": "string",
-            "frequency": "string"
+            "frequency": "string",
+            "risk_cluster": "string"
         }}
     ],
     "Heart_Rate": [
         {{
             "recommendation": "string",
             "explanation": "string",
-            "frequency": "string"
+            "frequency": "string",
+            "risk_cluster": "string"
         }}
     ]
 }}
 
 Guidelines:
 1. Generate EXACTLY the number of recommendations specified for each category
-2. Recommendations should be specific and actionable
-3. Focus on lifestyle changes that don't require special equipment
-4. Avoid medical advice or treatment suggestions
-5. Keep recommendations simple and achievable
-6. Include clear frequency guidelines
-7. Explanations should reference the data from the SOAP note or risk analysis
-8. If past accepted recommendations exist, maintain a similar style and complexity level
-9. Ensure new recommendations are unique and not duplicates of past ones
-10. Return ONLY the JSON object - no other text, no markdown formatting
+2. For each recommendation, specify the risk cluster it addresses from the risk analysis results
+3. Recommendations should be specific and actionable
+4. Focus on lifestyle changes that don't require special equipment
+5. Avoid medical advice or treatment suggestions
+6. Keep recommendations simple and achievable
+7. Include clear frequency guidelines
+8. Explanations should reference the data from the SOAP note or risk analysis
+9. If past accepted recommendations exist, maintain a similar style and complexity level
+10. Ensure new recommendations are unique and not duplicates of past ones
+11. Return ONLY the JSON object - no other text, no markdown formatting
 
 IMPORTANT: Your response must be a valid JSON object and nothing else. Do not include any explanatory text, markdown formatting, or code blocks."""
 

@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS recommendations (
     recommendation TEXT NOT NULL,
     explanation TEXT NOT NULL,
     frequency TEXT NOT NULL,
+    risk_cluster TEXT,
     accepted BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );

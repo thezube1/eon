@@ -28,6 +28,9 @@ struct StatsView: View {
             "Endocrine": []
         ]
         
+        // Get recommendation counts from the response
+        let recommendationCounts = analysis.recommendation_counts ?? [:]
+        
         // Populate the clusters
         for cluster in analysis.formatted_predictions {
             for disease in cluster.diseases {
@@ -162,7 +165,7 @@ struct StatsView: View {
                                 
                                 if showPrimaryFactors {
                                     ForEach(primaryFactors, id: \.cluster_name) { cluster in
-                                        RiskClusterView(cluster: cluster)
+                                        RiskClusterView(cluster: cluster, recommendationCount: recommendationCounts[cluster.cluster_name] ?? 0)
                                     }
                                     .transition(.opacity.combined(with: .move(edge: .top)))
                                 }
@@ -202,7 +205,7 @@ struct StatsView: View {
                                     
                                     if showOtherFactors {
                                         ForEach(otherClusters, id: \.cluster_name) { cluster in
-                                            RiskClusterView(cluster: cluster)
+                                            RiskClusterView(cluster: cluster, recommendationCount: recommendationCounts[cluster.cluster_name] ?? 0)
                                         }
                                         .transition(.opacity.combined(with: .move(edge: .top)))
                                     }
@@ -285,6 +288,7 @@ struct PrimaryFactorRow: View {
 
 struct RiskClusterView: View {
     let cluster: RiskCluster
+    let recommendationCount: Int
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -294,7 +298,7 @@ struct RiskClusterView: View {
                     .font(.title2)
                     .bold()
                 Spacer()
-                RiskLevelBadge(riskLevel: cluster.risk_level)
+                RiskLevelBadge(riskLevel: cluster.risk_level, recommendationCount: recommendationCount)
             }
             
             // Diseases
@@ -339,6 +343,7 @@ struct DiseaseRow: View {
 
 struct RiskLevelBadge: View {
     let riskLevel: String
+    let recommendationCount: Int
     
     private var backgroundColor: Color {
         switch riskLevel.lowercased() {
@@ -367,14 +372,29 @@ struct RiskLevelBadge: View {
     }
     
     var body: some View {
-        Text(riskLevel)
-            .font(.caption)
-            .bold()
-            .foregroundColor(textColor)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(backgroundColor)
-            .clipShape(Capsule())
+        HStack(spacing: 8) {
+            Text(riskLevel)
+                .font(.caption)
+                .bold()
+            
+            if recommendationCount > 0 {
+                Text("•")
+                    .font(.caption)
+                
+                HStack(spacing: 2) {
+                    Text("\(recommendationCount)")
+                        .font(.caption)
+                        .bold()
+                    Image(systemName: "list.bullet")
+                        .font(.caption)
+                }
+            }
+        }
+        .foregroundColor(textColor)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(backgroundColor)
+        .clipShape(Capsule())
     }
 }
 
