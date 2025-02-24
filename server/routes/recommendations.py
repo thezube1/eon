@@ -42,12 +42,56 @@ def generate_recommendations(soap_note: str, formatted_predictions: list, past_r
         location="us-central1",
     )
 
+    # Calculate recommended number of recommendations per category based on risk analysis
+    category_recommendation_counts = {
+        "Sleep": 0,
+        "Steps": 0,
+        "Heart_Rate": 0
+    }
+    
+    # Map risk levels to numeric values for calculation
+    risk_level_weights = {
+        "low": 1,
+        "moderate": 2,
+        "medium": 2,
+        "high": 3
+    }
+    
+    # Analyze predictions to determine recommendation counts
+    for prediction in formatted_predictions:
+        risk_level = prediction.get('risk_level', '').lower()
+        diseases = prediction.get('diseases', [])
+        cluster = prediction.get('cluster_name', '').lower()
+        
+        # Calculate base count from risk level and disease count
+        risk_weight = risk_level_weights.get(risk_level, 1)
+        disease_count = len(diseases)
+        
+        # Calculate recommendation count: 1-2 for low risk/few diseases, 2-3 for medium, 3-4 for high risk/many diseases
+        rec_count = min(4, max(1, risk_weight + (disease_count // 3)))
+        
+        # Map cluster to health metric categories
+        if 'sleep' in cluster:
+            category_recommendation_counts['Sleep'] = max(category_recommendation_counts['Sleep'], rec_count)
+        elif 'activity' in cluster or 'exercise' in cluster:
+            category_recommendation_counts['Steps'] = max(category_recommendation_counts['Steps'], rec_count)
+        elif 'heart' in cluster or 'cardio' in cluster:
+            category_recommendation_counts['Heart_Rate'] = max(category_recommendation_counts['Heart_Rate'], rec_count)
+
+    # Ensure at least 1 recommendation per category
+    for category in category_recommendation_counts:
+        if category_recommendation_counts[category] == 0:
+            category_recommendation_counts[category] = 1
+
     # Prepare input for Gemini
     input_text = f"""SOAP Note:
 {soap_note}
 
 Risk Analysis Results:
-{json.dumps(formatted_predictions, indent=2)}"""
+{json.dumps(formatted_predictions, indent=2)}
+
+Recommended recommendation counts per category:
+{json.dumps(category_recommendation_counts, indent=2)}"""
 
     # Add past recommendations to input if available
     if past_recommendations:
@@ -61,43 +105,46 @@ Past Unaccepted Recommendations:
 
     text_part = types.Part.from_text(text=input_text)
     
-    system_instruction = """You are a health recommendations generator. Based on the provided SOAP note, risk analysis, and past recommendations (if available), generate practical, actionable recommendations that anyone can implement in their daily life. Focus on three specific categories: Sleep, Steps, and Heart Rate.
+    system_instruction = f"""You are a health recommendations generator. Based on the provided SOAP note, risk analysis, and past recommendations (if available), generate practical, actionable recommendations that anyone can implement in their daily life. Focus on three specific categories: Sleep, Steps, and Heart Rate.
 
 Your task is to:
 1. Analyze the SOAP note and risk predictions
-2. If past recommendations are provided:
+2. Generate recommendations according to the specified counts for each category:
+   - Sleep: {category_recommendation_counts['Sleep']} recommendations
+   - Steps: {category_recommendation_counts['Steps']} recommendations
+   - Heart Rate: {category_recommendation_counts['Heart_Rate']} recommendations
+3. If past recommendations are provided:
    - Study the accepted recommendations to understand user preferences
    - Avoid repeating exact recommendations that were previously unaccepted
    - Generate new recommendations that align with the style and complexity of accepted recommendations
-3. Generate specific, actionable recommendations for each category
 4. Return ONLY a valid JSON object in exactly this format (no other text before or after):
 
-{
+{{
     "Sleep": [
-        {
+        {{
             "recommendation": "string",
             "explanation": "string",
             "frequency": "string"
-        }
+        }}
     ],
     "Steps": [
-        {
+        {{
             "recommendation": "string",
             "explanation": "string",
             "frequency": "string"
-        }
+        }}
     ],
     "Heart_Rate": [
-        {
+        {{
             "recommendation": "string",
             "explanation": "string",
             "frequency": "string"
-        }
+        }}
     ]
-}
+}}
 
 Guidelines:
-1. Each category should have 2-4 recommendations
+1. Generate EXACTLY the number of recommendations specified for each category
 2. Recommendations should be specific and actionable
 3. Focus on lifestyle changes that don't require special equipment
 4. Avoid medical advice or treatment suggestions

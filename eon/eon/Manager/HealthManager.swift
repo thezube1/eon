@@ -22,10 +22,26 @@ class HealthManager: ObservableObject {
     @Published var stepCount: Double = 0.0
     @Published var sleepHours: Double = 0.0
     @Published var heartRate: Double = 0.0
+    
+    // Add state to track background tasks
+    private var backgroundTask: Task<Void, Never>?
+    private var hasRunInitialAnalysis = false
 
     init() {
         // Load stored authorization status when the app launches
         self.isAuthorized = UserDefaults.standard.bool(forKey: "HealthKitAuthorized")
+        
+        // If already authorized, start background tasks
+        if self.isAuthorized {
+            print("HealthKit already authorized - Starting background tasks")
+            fetchAllHealthData()
+            startBackgroundTasks()
+        }
+    }
+    
+    // Add deinit to cancel background task
+    deinit {
+        backgroundTask?.cancel()
     }
 
     private var readTypes: Set<HKObjectType> {
@@ -53,9 +69,13 @@ class HealthManager: ObservableObject {
         
         healthStore.requestAuthorization(toShare: nil, read: readTypes) { success, error in
             DispatchQueue.main.async {
-                self.isAuthorized = success // ✅ This now persists across app launches
+                self.isAuthorized = success
                 print("HealthKit Authorization Status Changed: \(success)")
-                if success { self.fetchAllHealthData() }
+                if success { 
+                    self.fetchAllHealthData()
+                    // Start background tasks after authorization
+                    self.startBackgroundTasks()
+                }
             }
             completion(success, error)
         }
@@ -561,6 +581,71 @@ class HealthManager: ObservableObject {
     // Update the checkAndSync method to simply call syncWithServer
     func checkAndSync() async {
         await syncWithServer()
+    }
+
+    // Add new function to manage background tasks
+    private func startBackgroundTasks() {
+        print("Starting background health tasks...")
+        // Cancel any existing task
+        backgroundTask?.cancel()
+        
+        // Create a new detached task that won't be cancelled by view transitions
+        backgroundTask = Task.detached(priority: .background) { [weak self] in
+            guard let self = self else { return }
+            
+            do {
+                // First sync health data
+                print("Starting initial health sync...")
+                await self.syncWithServer()
+                
+                // Then run analysis and recommendations if needed
+                if !self.hasRunInitialAnalysis {
+                    print("Running initial analysis and recommendations...")
+                    await self.runAnalysisAndRecommendations()
+                    self.hasRunInitialAnalysis = true
+                }
+                
+                print("Setting up periodic health sync...")
+                // Set up periodic sync (every hour)
+                while !Task.isCancelled {
+                    try await Task.sleep(nanoseconds: 60 * 60 * 1_000_000_000) // 1 hour
+                    if !Task.isCancelled {
+                        print("Running periodic health sync...")
+                        await self.syncWithServer()
+                    }
+                }
+            } catch {
+                print("Background task error: \(error)")
+            }
+        }
+    }
+    
+    // Add function to run analysis and recommendations
+    private func runAnalysisAndRecommendations() async {
+        do {
+            print("Starting risk analysis calculation...")
+            // First run risk analysis
+            let riskAnalysisResponse = try await NetworkManager.shared.calculateRiskAnalysis(deviceId: deviceId)
+            
+            print("Risk analysis completed, checking predictions...")
+            // If risk analysis succeeds and has predictions, get recommendations
+            if riskAnalysisResponse.formatted_predictions.count > 0 {
+                print("Generating recommendations based on risk analysis...")
+                do {
+                    _ = try await NetworkManager.shared.getRecommendations(deviceId: deviceId)
+                    print("Recommendations generated successfully")
+                } catch {
+                    print("Error generating recommendations: \(error)")
+                }
+            } else {
+                print("No predictions found in risk analysis response")
+            }
+        } catch {
+            print("Error calculating risk analysis: \(error)")
+            if let urlError = error as? URLError {
+                print("URL Error details: \(urlError.localizedDescription)")
+            }
+        }
     }
 }
 

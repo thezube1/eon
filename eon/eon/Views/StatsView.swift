@@ -21,33 +21,73 @@ struct StatsView: View {
         // First, create primary clusters
         let primaryCategories = ["Cardiovascular", "Sleep", "Endocrine"]
         
-        for category in primaryCategories {
-            var categoryDiseases: [Disease] = []
-            
-            for cluster in analysis.formatted_predictions {
-                for disease in cluster.diseases {
-                    let description = disease.description.lowercased()
-                    let shouldInclude = (
-                        category == "Cardiovascular" && (description.contains("heart") || description.contains("cardio") || description.contains("blood")) ||
-                        category == "Sleep" && (description.contains("sleep") || description.contains("insomnia") || description.contains("apnea")) ||
-                        category == "Endocrine" && (description.contains("diabetes") || description.contains("thyroid") || description.contains("hormone"))
-                    )
-                    
-                    if shouldInclude && !processedDiseases.contains(disease.icd9_code) {
-                        categoryDiseases.append(disease)
+        // Initialize empty clusters for each category
+        var primaryClustersDict: [String: [Disease]] = [
+            "Cardiovascular": [],
+            "Sleep": [],
+            "Endocrine": []
+        ]
+        
+        // Populate the clusters
+        for cluster in analysis.formatted_predictions {
+            for disease in cluster.diseases {
+                let description = disease.description.lowercased()
+                let clusterName = cluster.cluster_name.lowercased()
+                
+                if description.contains("heart") || 
+                   description.contains("cardio") || 
+                   description.contains("blood") ||
+                   description.contains("vascular") ||
+                   clusterName.contains("cardio") ||
+                   clusterName.contains("heart") ||
+                   clusterName.contains("vascular") {
+                    if !processedDiseases.contains(disease.icd9_code) {
+                        primaryClustersDict["Cardiovascular"]?.append(disease)
+                        processedDiseases.insert(disease.icd9_code)
+                    }
+                } else if description.contains("sleep") || 
+                          description.contains("insomnia") || 
+                          description.contains("apnea") ||
+                          clusterName.contains("sleep") {
+                    if !processedDiseases.contains(disease.icd9_code) {
+                        primaryClustersDict["Sleep"]?.append(disease)
+                        processedDiseases.insert(disease.icd9_code)
+                    }
+                } else if description.contains("diabetes") || 
+                          description.contains("thyroid") || 
+                          description.contains("hormone") ||
+                          clusterName.contains("endocrine") ||
+                          clusterName.contains("metabolic") {
+                    if !processedDiseases.contains(disease.icd9_code) {
+                        primaryClustersDict["Endocrine"]?.append(disease)
                         processedDiseases.insert(disease.icd9_code)
                     }
                 }
             }
+        }
+        
+        // Create clusters in the specified order
+        primaryClusters = primaryCategories.compactMap { category -> RiskCluster? in
+            guard let diseases = primaryClustersDict[category], !diseases.isEmpty else { return nil }
             
-            if !categoryDiseases.isEmpty {
-                primaryClusters.append(RiskCluster(
-                    cluster_name: category,
-                    diseases: categoryDiseases,
-                    explanation: "Primary health factors related to \(category.lowercased()) conditions",
-                    risk_level: categoryDiseases.count > 2 ? "High Risk" : "Medium Risk"
-                ))
+            // Find the original cluster that had the most diseases from this category
+            var originalRiskLevel = "Medium Risk" // default fallback
+            if let matchingCluster = analysis.formatted_predictions.first(where: { cluster in
+                let clusterName = cluster.cluster_name.lowercased()
+                return clusterName.contains(category.lowercased()) ||
+                       (category == "Cardiovascular" && (clusterName.contains("cardio") || clusterName.contains("heart") || clusterName.contains("vascular"))) ||
+                       (category == "Sleep" && clusterName.contains("sleep")) ||
+                       (category == "Endocrine" && (clusterName.contains("endocrine") || clusterName.contains("metabolic")))
+            }) {
+                originalRiskLevel = matchingCluster.risk_level
             }
+            
+            return RiskCluster(
+                cluster_name: category,
+                diseases: diseases,
+                explanation: "Primary health factors related to \(category.lowercased()) conditions",
+                risk_level: originalRiskLevel
+            )
         }
         
         // Then filter remaining diseases for other clusters
