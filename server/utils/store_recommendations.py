@@ -35,7 +35,7 @@ except Exception as e:
 def store_recommendations(device_id: str, recommendations: dict) -> bool:
     """
     Store recommendations in the Supabase database.
-    Checks for existing recommendations to avoid duplicates.
+    Preserves accepted recommendations and replaces unaccepted ones with new suggestions.
     
     Args:
         device_id (str): The device_id of the user
@@ -56,22 +56,30 @@ def store_recommendations(device_id: str, recommendations: dict) -> bool:
         
         # Get existing recommendations for this device
         existing_recommendations = supabase.table('recommendations')\
-            .select('category, recommendation')\
+            .select('*')\
             .eq('device_id', device_internal_id)\
             .execute()
             
-        # Create a set of existing recommendation tuples (category, recommendation)
-        existing_set = {
+        # Create sets for tracking
+        accepted_recs = {
             (rec['category'], rec['recommendation']) 
-            for rec in existing_recommendations.data
+            for rec in existing_recommendations.data 
+            if rec['accepted']
         }
         
-        # Store each recommendation by category
+        # Delete all unaccepted recommendations
+        supabase.table('recommendations')\
+            .delete()\
+            .eq('device_id', device_internal_id)\
+            .eq('accepted', False)\
+            .execute()
+        
+        # Store each new recommendation by category
         for category, category_recommendations in recommendations.items():
             for rec in category_recommendations:
-                # Check if this recommendation already exists
-                if (category, rec['recommendation']) in existing_set:
-                    logger.info(f"Skipping duplicate recommendation for category {category}: {rec['recommendation']}")
+                # Skip if this recommendation already exists and was accepted
+                if (category, rec['recommendation']) in accepted_recs:
+                    logger.info(f"Skipping duplicate accepted recommendation for category {category}: {rec['recommendation']}")
                     continue
                 
                 recommendation_data = {
@@ -79,7 +87,8 @@ def store_recommendations(device_id: str, recommendations: dict) -> bool:
                     'category': category,
                     'recommendation': rec['recommendation'],
                     'explanation': rec['explanation'],
-                    'frequency': rec['frequency']
+                    'frequency': rec['frequency'],
+                    'accepted': False  # New recommendations start as unaccepted
                 }
                 
                 result = supabase.table('recommendations').insert(recommendation_data).execute()

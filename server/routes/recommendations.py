@@ -7,7 +7,8 @@ import requests
 from utils.retrieve_user_metrics import retrieve_user_metrics
 from utils.soap_generator import generate_soap_note
 from utils.store_recommendations import store_recommendations
-from supabase import create_client
+from utils.retrive_user_recommendations import retrieve_user_recommendations
+from utils.supabase.init_supabase import init_supabase
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -15,40 +16,14 @@ logger = logging.getLogger(__name__)
 # Create Blueprint
 recommendations_bp = Blueprint('recommendations', __name__)
 
-def init_supabase():
-    """Initialize Supabase client with better error handling"""
-    try:
-        # Hardcoded Supabase credentials
-        supabase_url = "https://teywcjjsffwlvlawueze.supabase.co"
-        supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRleXdjampzZmZ3bHZsYXd1ZXplIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczODI3NTYzNywiZXhwIjoyMDUzODUxNjM3fQ.U7bW40zIoMZEg335gMFWWlh43N7bODBLFmGk8PGeejM"
-        
-        logger.info("Initializing Supabase client")
-        client = create_client(supabase_url, supabase_key)
-        
-        # Test the connection
-        client.table('devices').select('id').limit(1).execute()
-        logger.info("Successfully tested Supabase connection")
-        
-        return client
-    except Exception as e:
-        logger.error(f"Failed to initialize Supabase client: {str(e)}", exc_info=True)
-        raise
-
-# Initialize Supabase client
-try:
-    supabase = init_supabase()
-    logger.info("Supabase client initialized successfully")
-except Exception as e:
-    logger.error(f"Failed to initialize Supabase client: {str(e)}", exc_info=True)
-    raise
-
-def generate_recommendations(soap_note: str, formatted_predictions: list) -> str:
+def generate_recommendations(soap_note: str, formatted_predictions: list, past_recommendations: dict = None) -> str:
     """
     Generate personalized health recommendations using Gemini model.
     
     Args:
         soap_note (str): The SOAP note containing patient data
         formatted_predictions (list): List of risk predictions and their explanations
+        past_recommendations (dict): Dictionary of past recommendations categorized by acceptance status
         
     Returns:
         str: JSON string containing structured recommendations
@@ -66,14 +41,28 @@ def generate_recommendations(soap_note: str, formatted_predictions: list) -> str
 Risk Analysis Results:
 {json.dumps(formatted_predictions, indent=2)}"""
 
+    # Add past recommendations to input if available
+    if past_recommendations:
+        input_text += f"""
+
+Past Accepted Recommendations:
+{json.dumps(past_recommendations['accepted'], indent=2)}
+
+Past Unaccepted Recommendations:
+{json.dumps(past_recommendations['unaccepted'], indent=2)}"""
+
     text_part = types.Part.from_text(text=input_text)
     
-    system_instruction = """You are a health recommendations generator. Based on the provided SOAP note and risk analysis, generate practical, actionable recommendations that anyone can implement in their daily life. Focus on three specific categories: Sleep, Steps, and Heart Rate.
+    system_instruction = """You are a health recommendations generator. Based on the provided SOAP note, risk analysis, and past recommendations (if available), generate practical, actionable recommendations that anyone can implement in their daily life. Focus on three specific categories: Sleep, Steps, and Heart Rate.
 
 Your task is to:
 1. Analyze the SOAP note and risk predictions
-2. Generate specific, actionable recommendations for each category
-3. Return ONLY a valid JSON object in exactly this format (no other text before or after):
+2. If past recommendations are provided:
+   - Study the accepted recommendations to understand user preferences
+   - Avoid repeating exact recommendations that were previously unaccepted
+   - Generate new recommendations that align with the style and complexity of accepted recommendations
+3. Generate specific, actionable recommendations for each category
+4. Return ONLY a valid JSON object in exactly this format (no other text before or after):
 
 {
     "Sleep": [
@@ -107,7 +96,9 @@ Guidelines:
 5. Keep recommendations simple and achievable
 6. Include clear frequency guidelines
 7. Explanations should reference the data from the SOAP note or risk analysis
-8. Return ONLY the JSON object - no other text, no markdown formatting
+8. If past accepted recommendations exist, maintain a similar style and complexity level
+9. Ensure new recommendations are unique and not duplicates of past ones
+10. Return ONLY the JSON object - no other text, no markdown formatting
 
 IMPORTANT: Your response must be a valid JSON object and nothing else. Do not include any explanatory text, markdown formatting, or code blocks."""
 
@@ -220,7 +211,8 @@ def get_recommendations():
         logger.info(f"Getting stored risk analysis for user {user_id}")
         
         # Make internal request to risk analysis GET endpoint
-        base_url = "https://eon-550878280011.us-central1.run.app"
+        #base_url = "https://eon-550878280011.us-central1.run.app"
+        base_url = "http://localhost:8000"
         risk_analysis_response = requests.get(
             f"{base_url}/api/risk-analysis/{user_id}",
             headers={"Content-Type": "application/json"},
@@ -260,6 +252,9 @@ def get_recommendations():
                 logger.warning(f"No metrics found for user {user_id}, generating SOAP note from predictions only")
                 soap_note = generate_soap_note(json.dumps(formatted_predictions, indent=2))
             
+            # Get past recommendations for the user
+            past_recommendations = retrieve_user_recommendations(user_id)
+            
         except json.JSONDecodeError as e:
             logger.error(f"Failed to decode risk analysis response: {str(e)}")
             logger.error(f"Response content: {risk_analysis_response.text}")
@@ -267,8 +262,8 @@ def get_recommendations():
                 'error': 'Invalid response from risk analysis service'
             }), 500
             
-        # Generate recommendations using stored predictions and generated SOAP note
-        recommendations = generate_recommendations(soap_note, formatted_predictions)
+        # Generate recommendations using stored predictions, generated SOAP note, and past recommendations
+        recommendations = generate_recommendations(soap_note, formatted_predictions, past_recommendations)
         
         # Store recommendations in database
         storage_success = store_recommendations(user_id, recommendations)
@@ -279,7 +274,8 @@ def get_recommendations():
             'recommendations': recommendations,
             'source_data': {
                 'soap_note': soap_note,
-                'formatted_predictions': formatted_predictions
+                'formatted_predictions': formatted_predictions,
+                'past_recommendations': past_recommendations
             },
             'user_id': user_id
         }
