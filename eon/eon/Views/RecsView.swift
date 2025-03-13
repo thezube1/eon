@@ -4,72 +4,67 @@ struct RecsView: View {
     @State private var recommendations: RecommendationsResponse?
     @State private var isLoading = false
     @State private var error: String?
+    @State private var selectedCategory: String = "All"
     var focusedCluster: String? = nil
+    
+    private let categories = ["All", "Sleep", "Steps", "Heart Rate"]
+    
+    // Helper function to convert cluster name to category
+    private func categoryForCluster(_ cluster: String?) -> String {
+        guard let cluster = cluster?.lowercased() else { return "All" }
+        
+        // Direct mapping from StatsView categories
+        switch cluster {
+        case "cardiovascular":
+            return "Heart Rate"
+        case "sleep":
+            return "Sleep"
+        case "metabolic":
+            return "Steps"
+        default:
+            // For other cases, use keyword matching
+            if cluster.contains("sleep") {
+                return "Sleep"
+            } else if cluster.contains("cardio") || cluster.contains("heart") || cluster.contains("vascular") {
+                return "Heart Rate"
+            } else if cluster.contains("metabolic") || cluster.contains("activity") || cluster.contains("exercise") {
+                return "Steps"
+            }
+            return "All"
+        }
+    }
     
     // Helper functions to determine section visibility and focus
     private func shouldShowSleepSection() -> Bool {
-        focusedCluster == nil || focusedCluster?.lowercased().contains("sleep") == true
+        selectedCategory == "All" || selectedCategory == "Sleep"
     }
     
     private func shouldShowStepsSection() -> Bool {
-        guard let cluster = focusedCluster?.lowercased() else { return true }
-        return cluster.contains("activity") || 
-               cluster.contains("exercise") || 
-               cluster.contains("metabolic") ||
-               cluster.contains("steps") ||
-               cluster.contains("movement")
+        selectedCategory == "All" || selectedCategory == "Steps"
     }
     
     private func shouldShowHeartSection() -> Bool {
-        guard let cluster = focusedCluster?.lowercased() else { return true }
-        return cluster.contains("heart") || 
-               cluster.contains("cardio") || 
-               cluster.contains("vascular")
+        selectedCategory == "All" || selectedCategory == "Heart Rate"
     }
     
     private func isSectionFocused(_ section: String) -> Bool {
-        guard let cluster = focusedCluster?.lowercased() else { return false }
-        switch section.lowercased() {
-        case "sleep":
-            return cluster.contains("sleep")
-        case "steps":
-            return cluster.contains("activity") || 
-                   cluster.contains("exercise") || 
-                   cluster.contains("metabolic") ||
-                   cluster.contains("steps") ||
-                   cluster.contains("movement")
-        case "heart":
-            return cluster.contains("heart") || 
-                   cluster.contains("cardio") ||
-                   cluster.contains("vascular")
-        default:
-            return false
-        }
+        selectedCategory == section || selectedCategory == "All"
     }
     
     private func filterRecommendations(_ recommendations: [Recommendation]) -> [Recommendation] {
-        guard let cluster = focusedCluster?.lowercased() else { 
-            print("No focused cluster, showing all recommendations")
-            return recommendations 
+        // If no focused cluster or All category selected, show all recommendations
+        if focusedCluster == nil || selectedCategory == "All" {
+            return recommendations
         }
         
-        print("Filtering recommendations for cluster: \(cluster)")
-        print("Available recommendations: \(recommendations.map { "[\($0.risk_cluster ?? "nil")] \($0.recommendation)" })")
-        
+        // Use the selected category for filtering instead of the focused cluster
         return recommendations.filter { rec in
-            // If risk_cluster is nil, try to infer the category from the recommendation text
             let recommendationText = rec.recommendation.lowercased()
             let explanationText = rec.explanation.lowercased()
             let riskCluster = rec.risk_cluster?.lowercased() ?? ""
             
-            // Keywords for activity/metabolic recommendations
-            let activityKeywords = [
-                "walk", "steps", "activity", "exercise", "movement",
-                "stand", "active", "physical", "metabolic", "metabolism"
-            ]
-            
-            switch cluster {
-            case "cardiovascular":
+            switch selectedCategory {
+            case "Heart Rate":
                 return riskCluster.contains("cardio") || 
                        riskCluster.contains("heart") || 
                        riskCluster.contains("vascular") ||
@@ -79,23 +74,25 @@ struct RecsView: View {
                        explanationText.contains("heart") ||
                        explanationText.contains("cardio") ||
                        explanationText.contains("blood pressure")
-            case "sleep":
+            case "Sleep":
                 return riskCluster.contains("sleep") ||
                        recommendationText.contains("sleep") ||
                        recommendationText.contains("bed") ||
                        recommendationText.contains("rest") ||
                        explanationText.contains("sleep") ||
                        explanationText.contains("circadian")
-            case "metabolic":
-                return riskCluster.contains("metabolic") || 
-                       riskCluster.contains("endocrine") ||
-                       activityKeywords.contains(where: recommendationText.contains) ||
-                       activityKeywords.contains(where: explanationText.contains) ||
-                       recommendationText.contains("diabetes") ||
-                       recommendationText.contains("thyroid") ||
-                       explanationText.contains("blood sugar")
+            case "Steps":
+                let activityKeywords = [
+                    "walk", "steps", "activity", "exercise", "movement",
+                    "stand", "active", "physical", "metabolic", "metabolism"
+                ]
+                return activityKeywords.contains { keyword in
+                    riskCluster.contains(keyword) ||
+                    recommendationText.contains(keyword) ||
+                    explanationText.contains(keyword)
+                }
             default:
-                return riskCluster.contains(cluster)
+                return true
             }
         }
     }
@@ -110,6 +107,15 @@ struct RecsView: View {
                 } else if let recs = recommendations {
                     ScrollView {
                         VStack(spacing: 24) {
+                            // Category Filter
+                            Picker("Category", selection: $selectedCategory) {
+                                ForEach(categories, id: \.self) { category in
+                                    Text(category)
+                                }
+                            }
+                            .pickerStyle(SegmentedPickerStyle())
+                            .padding(.horizontal)
+                            
                             // Sleep recommendations
                             if shouldShowSleepSection() {
                                 let sleepRecs = filterRecommendations(recs.recommendations.Sleep)
@@ -120,7 +126,7 @@ struct RecsView: View {
                                         color: .indigo,
                                         recommendations: sleepRecs,
                                         onRecommendationUpdated: loadRecommendations,
-                                        isFocused: isSectionFocused("sleep")
+                                        isFocused: isSectionFocused("Sleep")
                                     )
                                 }
                             }
@@ -135,7 +141,7 @@ struct RecsView: View {
                                         color: .green,
                                         recommendations: stepsRecs,
                                         onRecommendationUpdated: loadRecommendations,
-                                        isFocused: isSectionFocused("steps")
+                                        isFocused: isSectionFocused("Steps")
                                     )
                                 }
                             }
@@ -150,7 +156,7 @@ struct RecsView: View {
                                         color: .red,
                                         recommendations: heartRecs,
                                         onRecommendationUpdated: loadRecommendations,
-                                        isFocused: isSectionFocused("heart")
+                                        isFocused: isSectionFocused("Heart Rate")
                                     )
                                 }
                             }
@@ -164,6 +170,8 @@ struct RecsView: View {
             .navigationTitle("Recommendations")
         }
         .onAppear {
+            // Set initial category based on focusedCluster
+            selectedCategory = categoryForCluster(focusedCluster)
             Task {
                 await loadRecommendations()
             }
@@ -203,13 +211,19 @@ struct RecommendationSection: View {
             HStack {
                 Image(systemName: icon)
                     .font(.title2)
-                    .foregroundColor(color)
+                    .foregroundColor(.white)
                 Text(title)
                     .font(.title2)
                     .bold()
+                    .foregroundColor(.white)
             }
-            .padding(.bottom, 4)
-            .opacity(isFocused ? 1.0 : 0.7)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(color)
+            )
+            .opacity(isFocused ? 1.0 : 0.9)
             
             // Recommendations
             ForEach(recommendations) { rec in

@@ -65,6 +65,9 @@ struct TodayView: View {
     @State private var lastSegmentIndex: Int = -1 // Track last segment for haptic feedback
     @State private var lastHapticTime: TimeInterval = 0 // Track last haptic feedback time
     
+    // New state for recommendation count
+    @State private var recommendationCount: Int = 0
+    
     // Timer for refreshing notes
     private let notesRefreshTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
     
@@ -127,6 +130,7 @@ struct TodayView: View {
                     healthManager.dailySegments { newSegments in
                         self.segments = newSegments
                     }
+                    await loadRecommendationsCount()
                 }
             
             StatsView()
@@ -144,7 +148,6 @@ struct TodayView: View {
                 }
         }
         .onAppear {
-            showCheckInModal = shouldShowCheckIn()
             print("TodayView appeared - Starting data load")
             healthManager.dailySegments { newSegments in
                 self.segments = newSegments
@@ -155,6 +158,7 @@ struct TodayView: View {
             Task {
                 print("Starting initial loadNotes() task")
                 await loadNotes()
+                await loadRecommendationsCount()
             }
         }
         .onReceive(notesRefreshTimer) { _ in
@@ -235,10 +239,7 @@ struct TodayView: View {
             }
         }
         .onChange(of: selectedTab) { oldValue, newValue in
-            // Prevent tab navigation if check-in is required
-            if showCheckInModal {
-                selectedTab = 0
-            }
+            // No longer need to prevent tab navigation
         }
     }
     
@@ -410,102 +411,174 @@ struct TodayView: View {
         return formatter.string(from: date)
     }
     
+    // MARK: - Load Recommendations Count
+    private func loadRecommendationsCount() async {
+        guard let deviceId = UIDevice.current.identifierForVendor?.uuidString else {
+            print("No device ID available")
+            return
+        }
+        
+        do {
+            let recommendations = try await NetworkManager.shared.getStoredRecommendations(deviceId: deviceId)
+            let sleepCount = recommendations.recommendations.Sleep.count
+            let stepsCount = recommendations.recommendations.Steps.count
+            let heartCount = recommendations.recommendations.Heart_Rate.count
+            
+            DispatchQueue.main.async {
+                self.recommendationCount = sleepCount + stepsCount + heartCount
+            }
+        } catch {
+            print("Error loading recommendations count: \(error)")
+        }
+    }
+    
     // MARK: - Main Content View
     private var mainContent: some View {
         GeometryReader { screenGeo in
-            VStack(spacing: 0) { // Set spacing to 0 for main VStack
-                Spacer()
-                    .frame(height: 20) // Add minimal top spacing
-                
-                VStack(spacing: 2) { // Reduced spacing from 4 to 2 for more compact layout
-                    // Greeting or tapped category text
-                    Text(
-                        selectedCategory == nil
-                        ? "\(greeting(for: currentTime))"
-                        : descriptiveString(for: selectedCategory!)
-                    )
-                    .font(.largeTitle)
-                    .bold()
-                    .padding(.bottom, 2) // Reduced padding from 4 to 2
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 0) {
+                    Spacer()
+                        .frame(height: 20)
                     
-                    // Fixed height container for time display
-                    ZStack(alignment: .center) {
-                        // Time display below greeting
-                        if selectedTime != nil {
-                            HStack(spacing: 12) {
-                                Text(timeString(for: selectedTime!))
-                                    .font(.title2)
-                                    .foregroundColor(.gray)
-                                    .transition(.move(edge: .leading).combined(with: .opacity))
-                                
-                                Button(action: {
-                                    withAnimation {
-                                        selectedTime = nil
-                                        selectedCategory = nil
-                                    }
-                                }) {
-                                    Text("Reset")
-                                        .font(.subheadline)
-                                        .fontWeight(.medium)
-                                        .foregroundColor(.white)
-                                        .frame(height: 28)
-                                        .padding(.horizontal, 8)
-                                        .background(
-                                            Capsule()
-                                                .fill(Color.black)
-                                        )
-                                }
-                                .transition(.move(edge: .trailing).combined(with: .opacity))
-                            }
-                        }
+                    // Greeting section - moved to top
+                    VStack(spacing: 2) {
+                        // Greeting text - always shows greeting
+                        Text(greeting(for: currentTime))
+                        .font(.largeTitle)
+                        .bold()
+                        .padding(.vertical, 8) // Even padding top and bottom
                     }
-                    .frame(height: 28) // Reduced from 32 to 28 for more compact layout
-                    .animation(.spring(response: 0.4, dampingFraction: 0.8), value: selectedTime)
-                    .padding(.bottom, 2) // Reduced padding from 4 to 2
-                }
-                
-                // Health bar geometry
-                GeometryReader { mainGeo in
-                    ZStack(alignment: .top) {
-                        // 48 segments, clipped corners, etc.
-                        VStack(spacing: 0) {
-                            ForEach(0..<segments.count, id: \.self) { i in
-                                let segment = segments[i]
-                                Rectangle()
-                                    .fill(segment.category.color())
-                                    .frame(height: min(mainGeo.size.height * 0.9, mainGeo.size.height - 40) / 48)
+                    .padding(.bottom, 8)
+                    
+                    // Check-in banner
+                    if shouldShowCheckIn() {
+                        HStack(spacing: 12) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .foregroundColor(.orange)
+                                .font(.title2)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Daily Check-in")
+                                    .font(.headline)
+                                Text("Take a moment to tell us how you're feeling")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Spacer()
+                            
+                            Button(action: {
+                                showCheckInModal = true
+                            }) {
+                                Text("Check In")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color.black)
+                                    .cornerRadius(8)
                             }
                         }
-                        .frame(width: min(mainGeo.size.width, 250),
-                               height: min(mainGeo.size.height * 0.9, mainGeo.size.height - 40))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .gesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { value in
-                                    if !isDragging {
-                                        hapticFeedback.prepare()
-                                        isDragging = true
-                                    }
-                                    let localY = value.location.y
-                                    updateSelectedTime(localY, in: mainGeo)
-                                }
-                                .onEnded { value in
-                                    isDragging = false
-                                    lastSegmentIndex = -1 // Reset segment tracking
-                                    let localY = value.location.y
-                                    updateSelectedTime(localY, in: mainGeo)
-                                }
-                        )
+                        .padding()
+                        .background(Color(.systemBackground))
+                        .cornerRadius(12)
+                        .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: 2)
+                        .padding(.horizontal)
+                        .padding(.bottom, 12)
+                    }
+                    
+                    // Recommendations banner
+                    Button(action: {
+                        // Navigate to recommendations tab
+                        selectedTab = 2
+                    }) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "lightbulb.fill")
+                                .foregroundColor(.yellow)
+                                .font(.headline)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(recommendationCount) Recommendations")
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                                Text("Tap to view your health insights")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                        }
+                        .padding()
+                        .background(Color(.systemBackground))
+                        .cornerRadius(12)
+                        .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: 2)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .padding(.horizontal)
+                    
+                    // Activity description and time display above timeline
+                    VStack(spacing: 0) {
+                        // Activity description text - changes based on selection
+                        Text(selectedCategory == nil ? "Your Activity Today" : descriptiveString(for: selectedCategory!))
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                            .transition(.opacity)
+                            .animation(.easeInOut(duration: 0.2), value: selectedCategory)
+                            .padding(.bottom, 4).padding(.top, 20)
                         
-                        // The black line indicator for current time
-                        let progress = (selectedTime != nil) ? dayProgress(for: selectedTime!) : dayProgress(for: currentTime)
-                        let indicatorY = progress * min(mainGeo.size.height * 0.9, mainGeo.size.height - 40)
-                        
-                        // Timeline bar
-                        Capsule()
-                            .fill(colorScheme == .dark ? Color.white : Color(hex: "#393938"))
-                            .frame(width: min(mainGeo.size.width, 250) + 20, height: 3)
-                            .offset(x: 0, y: indicatorY - 1.5)
+                        // Time display - always present but conditionally visible
+                        HStack(spacing: 12) {
+                            Text(selectedTime != nil ? timeString(for: selectedTime!) : "")
+                                .font(.subheadline)
+                                .foregroundColor(.gray)
+                                .transition(.move(edge: .leading).combined(with: .opacity))
+                                .opacity(selectedTime != nil ? 1 : 0)
+                            
+                            Button(action: {
+                                withAnimation {
+                                    selectedTime = nil
+                                    selectedCategory = nil
+                                }
+                            }) {
+                                Text("Reset")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        Capsule()
+                                            .fill(Color.black)
+                                    )
+                            }
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                            .opacity(selectedTime != nil ? 1 : 0)
+                            .disabled(selectedTime == nil)
+                        }
+                        .frame(height: 15) // Fixed height to prevent layout shifts
+                    }.padding(.bottom, 10)
+                    .animation(.spring(response: 0.4, dampingFraction: 0.8), value: selectedTime)
+                    
+                    // Health bar geometry - Always keep full size
+                    GeometryReader { mainGeo in
+                        ZStack(alignment: .top) {
+                            // 48 segments, clipped corners, etc.
+                            VStack(spacing: 0) {
+                                ForEach(0..<segments.count, id: \.self) { i in
+                                    let segment = segments[i]
+                                    Rectangle()
+                                        .fill(segment.category.color())
+                                        .frame(height: min(mainGeo.size.height * 0.9, mainGeo.size.height - 40) / 48)
+                                }
+                            }
+                            .frame(width: min(mainGeo.size.width, 250),
+                                   height: min(mainGeo.size.height * 0.9, mainGeo.size.height - 40))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
                             .gesture(
                                 DragGesture(minimumDistance: 0)
                                     .onChanged { value in
@@ -523,72 +596,107 @@ struct TodayView: View {
                                         updateSelectedTime(localY, in: mainGeo)
                                     }
                             )
-                        
-                        // Note indicators
-                        let calendar = Calendar.current
-                        let today = calendar.startOfDay(for: Date())
-                        let todayNotes = userNotes.filter { calendar.startOfDay(for: $0.timestamp) == today }
-                            .sorted { $0.timestamp < $1.timestamp }
-                        
-                        // First draw all lines (they'll be in the back)
-                        ForEach(todayNotes) { note in
-                            let noteProgress = dayProgress(for: note.timestamp)
-                            let noteY = noteProgress * min(mainGeo.size.height * 0.9, mainGeo.size.height - 40)
                             
-                            // Horizontal line
+                            // The black line indicator for current time
+                            let progress = (selectedTime != nil) ? dayProgress(for: selectedTime!) : dayProgress(for: currentTime)
+                            let indicatorY = progress * min(mainGeo.size.height * 0.9, mainGeo.size.height - 40)
+                            
+                            // Timeline bar
                             Capsule()
-                                .fill(Color.black.opacity(0.2))
-                                .frame(width: min(mainGeo.size.width, 250) + 20, height: 2)
-                                .offset(x: 0, y: noteY - 1)
-                                .zIndex(1)
-                        }
-                        
-                        // Then draw all circles (they'll be in front)
-                        ForEach(todayNotes) { note in
-                            let noteProgress = dayProgress(for: note.timestamp)
-                            let noteY = noteProgress * min(mainGeo.size.height * 0.9, mainGeo.size.height - 40)
-                            
-                            // Circle with note icon
-                            Circle()
-                                .fill(Color.black)
-                                .frame(width: 24, height: 24)
-                                .overlay(
-                                    ZStack {
-                                        Circle()
-                                            .stroke(Color.white, lineWidth: 2)
-                                        Image(systemName: "note.text")
-                                            .font(.system(size: 12))
-                                            .foregroundColor(.white)
-                                    }
+                                .fill(colorScheme == .dark ? Color.white : Color(hex: "#393938"))
+                                .frame(width: min(mainGeo.size.width, 250) + 20, height: 3)
+                                .offset(x: 0, y: indicatorY - 1.5)
+                                .gesture(
+                                    DragGesture(minimumDistance: 0)
+                                        .onChanged { value in
+                                            if !isDragging {
+                                                hapticFeedback.prepare()
+                                                isDragging = true
+                                            }
+                                            let localY = value.location.y
+                                            updateSelectedTime(localY, in: mainGeo)
+                                        }
+                                        .onEnded { value in
+                                            isDragging = false
+                                            lastSegmentIndex = -1 // Reset segment tracking
+                                            let localY = value.location.y
+                                            updateSelectedTime(localY, in: mainGeo)
+                                        }
                                 )
-                                .offset(x: -((min(mainGeo.size.width, 250) + 20) / 2) - 15, y: noteY - 12)
-                                .zIndex(Double(note.timestamp.timeIntervalSince1970))
-                                .onTapGesture {
-                                    editingNote = note
-                                    noteText = note.content
-                                    showNoteOverlay = true
-                                }
+                            
+                            // Note indicators
+                            let calendar = Calendar.current
+                            let today = calendar.startOfDay(for: Date())
+                            let todayNotes = userNotes.filter { calendar.startOfDay(for: $0.timestamp) == today }
+                                .sorted { $0.timestamp < $1.timestamp }
+                            
+                            // First draw all lines (they'll be in the back)
+                            ForEach(todayNotes) { note in
+                                let noteProgress = dayProgress(for: note.timestamp)
+                                let noteY = noteProgress * min(mainGeo.size.height * 0.9, mainGeo.size.height - 40)
+                                
+                                // Horizontal line
+                                Capsule()
+                                    .fill(Color.black.opacity(0.2))
+                                    .frame(width: min(mainGeo.size.width, 250) + 20, height: 2)
+                                    .offset(x: 0, y: noteY - 1)
+                                    .zIndex(1)
+                            }
+                            
+                            // Then draw all circles (they'll be in front)
+                            ForEach(todayNotes) { note in
+                                let noteProgress = dayProgress(for: note.timestamp)
+                                let noteY = noteProgress * min(mainGeo.size.height * 0.9, mainGeo.size.height - 40)
+                                
+                                // Circle with note icon
+                                Circle()
+                                    .fill(Color.black)
+                                    .frame(width: 24, height: 24)
+                                    .overlay(
+                                        ZStack {
+                                            Circle()
+                                                .stroke(Color.white, lineWidth: 2)
+                                            Image(systemName: "note.text")
+                                                .font(.system(size: 12))
+                                                .foregroundColor(.white)
+                                        }
+                                    )
+                                    .offset(x: -((min(mainGeo.size.width, 250) + 20) / 2) - 15, y: noteY - 12)
+                                    .zIndex(Double(note.timestamp.timeIntervalSince1970))
+                                    .onTapGesture {
+                                        editingNote = note
+                                        noteText = note.content
+                                        showNoteOverlay = true
+                                    }
+                            }
+                            
+                            // The plus button near the right side
+                            Button {
+                                editingNote = UserNote(id: -1, timestamp: Date(), content: "")
+                                noteText = ""
+                                showNoteOverlay = true
+                            } label: {
+                                Image(systemName: "plus.circle")
+                                    .font(.title)
+                                    .foregroundColor(colorScheme == .dark ? .white : .black)
+                            }
+                            .offset(x: min(mainGeo.size.width, 250)/2 + 35,
+                                    y: indicatorY - 16)
                         }
-                        
-                        // The plus button near the right side
-                        Button {
-                            editingNote = UserNote(id: -1, timestamp: Date(), content: "")
-                            noteText = ""
-                            showNoteOverlay = true
-                        } label: {
-                            Image(systemName: "plus.circle")
-                                .font(.title)
-                                .foregroundColor(colorScheme == .dark ? .white : .black)
-                        }
-                        .offset(x: min(mainGeo.size.width, 250)/2 + 35,
-                                y: indicatorY - 16)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    // Set fixed height for timeline - always maintain full size
+                    .frame(height: screenGeo.size.height * 0.75)
+                    .padding(.horizontal)
+                    
+                    // Add extra space at bottom when banners are showing to ensure scrollability
+                    if shouldShowCheckIn() || recommendationCount > 0 {
+                        Spacer()
+                            .frame(height: 40)
+                    }
                 }
-                .frame(height: screenGeo.size.height * 0.85)
-                .padding(.horizontal)
-                
-                Spacer()
+                // Set overall content height to be at least the screen height
+                .frame(minHeight: screenGeo.size.height)
             }
             .overlay {
                 if showNoteOverlay {
