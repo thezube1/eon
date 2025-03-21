@@ -7,7 +7,7 @@ struct RecsView: View {
     @State private var selectedCategory: String = "All"
     var focusedCluster: String? = nil
     
-    private let categories = ["All", "Sleep", "Steps", "Heart Rate"]
+    private let categories = ["All", "Heart Rate", "Sleep", "Steps"]
     
     // Helper function to convert cluster name to category
     private func categoryForCluster(_ cluster: String?) -> String {
@@ -116,6 +116,21 @@ struct RecsView: View {
                             .pickerStyle(SegmentedPickerStyle())
                             .padding(.horizontal)
                             
+                            // Heart Rate recommendations
+                            if shouldShowHeartSection() {
+                                let heartRecs = filterRecommendations(recs.recommendations.Heart_Rate)
+                                if !heartRecs.isEmpty {
+                                    RecommendationSection(
+                                        title: "Heart Rate",
+                                        icon: "heart.fill",
+                                        color: .red,
+                                        recommendations: heartRecs,
+                                        onRecommendationUpdated: loadRecommendations,
+                                        isFocused: isSectionFocused("Heart Rate")
+                                    )
+                                }
+                            }
+                            
                             // Sleep recommendations
                             if shouldShowSleepSection() {
                                 let sleepRecs = filterRecommendations(recs.recommendations.Sleep)
@@ -142,21 +157,6 @@ struct RecsView: View {
                                         recommendations: stepsRecs,
                                         onRecommendationUpdated: loadRecommendations,
                                         isFocused: isSectionFocused("Steps")
-                                    )
-                                }
-                            }
-                            
-                            // Heart Rate recommendations
-                            if shouldShowHeartSection() {
-                                let heartRecs = filterRecommendations(recs.recommendations.Heart_Rate)
-                                if !heartRecs.isEmpty {
-                                    RecommendationSection(
-                                        title: "Heart Rate",
-                                        icon: "heart.fill",
-                                        color: .red,
-                                        recommendations: heartRecs,
-                                        onRecommendationUpdated: loadRecommendations,
-                                        isFocused: isSectionFocused("Heart Rate")
                                     )
                                 }
                             }

@@ -366,6 +366,219 @@ def sync_health_data():
         logger.error(f"Error in sync_health_data: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+@health_bp.route('/onboard', methods=['POST'])
+def onboard_health_data():
+    """
+    Special route for handling onboarding data - processes 30 days of historical health data
+    when a user first installs the app.
+    """
+    try:
+        data = request.get_json()
+        logger.info("Received onboarding request with data structure: %s", {k: type(v) for k, v in data.items()})
+        
+        # Extract device info
+        device_info = data.get('device_info')
+        if not device_info or 'device_id' not in device_info:
+            return jsonify({'error': 'Device information is required'}), 400
+
+        logger.info(f"Processing onboarding data for device: {device_info['device_id']}")
+        
+        # First try to get existing device
+        device_response = supabase.table('devices').select('id').eq('device_id', device_info['device_id']).execute()
+        
+        if device_response.data:
+            # Device exists, get its ID
+            device_id = device_response.data[0]['id']
+            logger.info(f"Found existing device with ID: {device_id}")
+            
+            # Update device info
+            supabase.table('devices').update({
+                'device_name': device_info.get('device_name'),
+                'device_model': device_info.get('device_model'),
+                'os_version': device_info.get('os_version'),
+                'last_active': datetime.utcnow().isoformat()
+            }).eq('id', device_id).execute()
+        else:
+            # Insert new device
+            logger.info("Creating new device record for onboarding")
+            device_response = supabase.table('devices').insert({
+                'device_id': device_info['device_id'],
+                'device_name': device_info.get('device_name'),
+                'device_model': device_info.get('device_model'),
+                'os_version': device_info.get('os_version')
+            }).execute()
+            device_id = device_response.data[0]['id']
+
+        # Process heart rate data (potentially much larger dataset for onboarding)
+        heart_rate_data = data.get('heart_rate', [])
+        if heart_rate_data:
+            logger.info(f"Processing {len(heart_rate_data)} heart rate records for onboarding")
+            # Process in batches of 1000 to avoid request size limitations
+            batch_size = 1000
+            for i in range(0, len(heart_rate_data), batch_size):
+                batch = heart_rate_data[i:i+batch_size]
+                heart_rate_records = [{
+                    'device_id': device_id,
+                    'timestamp': reading['timestamp'],
+                    'bpm': reading['bpm'],
+                    'source': reading.get('source'),
+                    'context': reading.get('context', 'onboarding')
+                } for reading in batch]
+                
+                logger.info(f"Inserting batch of {len(heart_rate_records)} heart rate records (batch {i//batch_size + 1})")
+                supabase.table('heart_rate_measurements').insert(heart_rate_records).execute()
+
+        # Process step data with upsert logic
+        step_data = data.get('steps', [])
+        if step_data:
+            logger.info(f"Processing {len(step_data)} step records for onboarding")
+            try:
+                step_records = []
+                for reading in step_data:
+                    try:
+                        step_count = int(float(reading['step_count']))
+                        record = {
+                            'device_id': device_id,
+                            'date': reading['date'],
+                            'step_count': step_count,
+                            'source': reading.get('source', 'HealthKit')
+                        }
+                        step_records.append(record)
+                    except (ValueError, TypeError) as e:
+                        logger.error(f"Error processing step record: {reading}, Error: {str(e)}")
+                        continue
+
+                if step_records:
+                    logger.info(f"Upserting {len(step_records)} step records for onboarding")
+                    result = supabase.table('step_counts').upsert(
+                        step_records,
+                        on_conflict='device_id,date'
+                    ).execute()
+                    logger.info(f"Step records upsert result: {result}")
+                else:
+                    logger.warning("No valid step records to insert for onboarding")
+
+            except Exception as e:
+                logger.error(f"Error upserting onboarding step data: {str(e)}", exc_info=True)
+                pass
+
+        # Process sleep data
+        sleep_data = data.get('sleep', [])
+        if sleep_data:
+            logger.info(f"Processing {len(sleep_data)} sleep records for onboarding")
+            # Process in batches to avoid request size limitations
+            batch_size = 1000
+            for i in range(0, len(sleep_data), batch_size):
+                batch = sleep_data[i:i+batch_size]
+                sleep_records = [{
+                    'device_id': device_id,
+                    'start_time': record['start_time'],
+                    'end_time': record['end_time'],
+                    'sleep_stage': record.get('sleep_stage'),
+                    'source': record.get('source')
+                } for record in batch]
+                
+                logger.info(f"Inserting batch of {len(sleep_records)} sleep records (batch {i//batch_size + 1})")
+                supabase.table('sleep_records').insert(sleep_records).execute()
+
+        # Process characteristics data
+        characteristics_data = data.get('characteristics', [])
+        if characteristics_data and len(characteristics_data) > 0:
+            char_data = characteristics_data[0]  # Get the first (and should be only) record
+            logger.info("Processing characteristics data for onboarding")
+            try:
+                # Use upsert to handle both insert and update cases
+                char_record = {
+                    'device_id': device_id,
+                    'date_of_birth': char_data.get('date_of_birth'),
+                    'biological_sex': char_data.get('biological_sex'),
+                    'blood_type': char_data.get('blood_type'),
+                    'updated_at': datetime.utcnow().isoformat()
+                }
+                supabase.table('user_characteristics').upsert(
+                    char_record,
+                    on_conflict='device_id'
+                ).execute()
+                logger.info("Successfully processed characteristics data for onboarding")
+            except Exception as e:
+                logger.error(f"Error processing onboarding characteristics data: {str(e)}", exc_info=True)
+
+        # Process body measurements data
+        body_measurements_data = data.get('body_measurements', [])
+        if body_measurements_data:
+            logger.info(f"Processing {len(body_measurements_data)} body measurements for onboarding")
+            try:
+                for measurement in body_measurements_data:
+                    measurement_record = {
+                        'device_id': device_id,
+                        'timestamp': measurement['timestamp'],
+                        'measurement_type': measurement['measurement_type'],
+                        'value': measurement['value'],
+                        'unit': measurement['unit'],
+                        'source': measurement.get('source')
+                    }
+                    
+                    # For onboarding, we'll just insert the measurement directly
+                    logger.info(f"Inserting new {measurement['measurement_type']} measurement for onboarding")
+                    supabase.table('body_measurements').insert(measurement_record).execute()
+
+                logger.info("Successfully processed body measurements data for onboarding")
+            except Exception as e:
+                logger.error(f"Error processing onboarding body measurements: {str(e)}", exc_info=True)
+
+        # Update sync status after onboarding
+        current_time = datetime.utcnow().isoformat()
+        sync_records = [
+            {
+                'device_id': device_id,
+                'metric_type': 'heart_rate',
+                'last_sync_time': current_time
+            },
+            {
+                'device_id': device_id,
+                'metric_type': 'steps',
+                'last_sync_time': current_time
+            },
+            {
+                'device_id': device_id,
+                'metric_type': 'sleep',
+                'last_sync_time': current_time
+            },
+            {
+                'device_id': device_id,
+                'metric_type': 'characteristics',
+                'last_sync_time': current_time
+            },
+            {
+                'device_id': device_id,
+                'metric_type': 'body_measurements',
+                'last_sync_time': current_time
+            }
+        ]
+
+        logger.info("Updating sync status after onboarding")
+        supabase.table('sync_status').upsert(
+            sync_records,
+            on_conflict='device_id,metric_type'
+        ).execute()
+
+        return jsonify({
+            'message': 'Onboarding health data synchronized successfully',
+            'device_id': device_id,
+            'metrics_synced': {
+                'heart_rate': len(heart_rate_data),
+                'steps': len(step_data),
+                'sleep': len(sleep_data),
+                'characteristics': len(characteristics_data),
+                'body_measurements': len(body_measurements_data)
+            },
+            'onboarding_complete': True
+        })
+
+    except Exception as e:
+        logger.error(f"Error in onboard_health_data: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 @health_bp.route('/devices/<device_id>/sync-status', methods=['GET'])
 def get_sync_status(device_id):
     try:

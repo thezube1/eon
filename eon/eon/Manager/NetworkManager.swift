@@ -175,6 +175,47 @@ class NetworkManager {
         return try JSONDecoder().decode(HealthMetrics.self, from: data)
     }
     
+    func onboardHealthData(deviceId: String, healthData: [String: Any]) async throws {
+        print("Sending onboarding health data to server...")
+        let url = URL(string: "\(baseURL)/health/onboard")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let deviceInfo: [String: Any] = [
+            "device_id": deviceId,
+            "device_name": UIDevice.current.name,
+            "device_model": UIDevice.current.model,
+            "os_version": UIDevice.current.systemVersion
+        ]
+        
+        var bodyDict = healthData
+        bodyDict["device_info"] = deviceInfo
+        bodyDict["is_onboarding"] = true
+        
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: bodyDict)
+            print("Onboarding request body size: \(request.httpBody?.count ?? 0) bytes")
+        } catch {
+            print("Error serializing onboarding request body: \(error)")
+            throw error
+        }
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NetworkError.invalidResponse
+        }
+        
+        if !(200...299).contains(httpResponse.statusCode) {
+            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                print("Server error response: \(errorJson)")
+            }
+            throw NetworkError.serverError(statusCode: httpResponse.statusCode)
+        }
+        
+        print("Onboarding data successfully sent to server")
+    }
+    
     func syncHealthData(deviceId: String, healthData: [String: Any]) async throws {
         print("Attempting to sync health data to URL: \(baseURL)/health/sync")
         let url = URL(string: "\(baseURL)/health/sync")!
