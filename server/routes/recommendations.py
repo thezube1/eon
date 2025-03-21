@@ -5,6 +5,7 @@ import json
 import logging
 import requests
 from utils.retrieve_user_metrics import retrieve_user_metrics
+from utils.retrieve_user_notes import retrieve_user_notes
 from utils.soap_generator import generate_soap_note
 from utils.store_recommendations import store_recommendations
 from utils.retrive_user_recommendations import retrieve_user_recommendations
@@ -24,7 +25,7 @@ except Exception as e:
     logger.error(f"Failed to initialize Supabase client: {str(e)}", exc_info=True)
     raise
 
-def generate_recommendations(soap_note: str, formatted_predictions: list, past_recommendations: dict = None) -> str:
+def generate_recommendations(soap_note: str, formatted_predictions: list, past_recommendations: dict = None, user_notes: list = None) -> str:
     """
     Generate personalized health recommendations using Gemini model.
     
@@ -32,6 +33,7 @@ def generate_recommendations(soap_note: str, formatted_predictions: list, past_r
         soap_note (str): The SOAP note containing patient data
         formatted_predictions (list): List of risk predictions and their explanations
         past_recommendations (dict): Dictionary of past recommendations categorized by acceptance status
+        user_notes (list): List of user notes with timestamps
         
     Returns:
         str: JSON string containing structured recommendations
@@ -103,21 +105,35 @@ Past Accepted Recommendations:
 Past Unaccepted Recommendations:
 {json.dumps(past_recommendations['unaccepted'], indent=2)}"""
 
+    # Add user notes to input if available
+    if user_notes and len(user_notes) > 0:
+        input_text += f"""
+
+User Notes:
+{json.dumps(user_notes, indent=2)}"""
+
     text_part = types.Part.from_text(text=input_text)
     
-    system_instruction = f"""You are a health recommendations generator. Based on the provided SOAP note, risk analysis, and past recommendations (if available), generate practical, actionable recommendations that anyone can implement in their daily life. Focus on three specific categories: Sleep, Steps, and Heart Rate.
+    system_instruction = f"""You are a health recommendations generator. Based on the provided SOAP note, risk analysis, past recommendations (if available), and user notes (if available), generate practical, actionable recommendations that anyone can implement in their daily life. Focus on three specific categories: Sleep, Steps, and Heart Rate.
 
 Your task is to:
-1. Analyze the SOAP note and risk predictions
+1. Analyze the SOAP note, risk predictions, and user notes
 2. Generate recommendations according to the specified counts for each category:
-   - Sleep: {category_recommendation_counts['Sleep']} recommendations
-   - Steps: {category_recommendation_counts['Steps']} recommendations
-   - Heart Rate: {category_recommendation_counts['Heart_Rate']} recommendations
-3. If past recommendations are provided:
+   - Sleep: {max(2, category_recommendation_counts['Sleep'])} recommendations
+   - Steps: {max(2, category_recommendation_counts['Steps'])} recommendations
+   - Heart Rate: {max(2, category_recommendation_counts['Heart_Rate'])} recommendations
+
+3. If user notes are provided:
+   - Analyze the notes to understand the user's daily habits, physical/mental feelings, and activities
+   - Adapt recommendations to align with the user's lifestyle and preferences mentioned in their notes
+   - Directly reference specific habits or activities mentioned in the notes when relevant
+
+4. If past recommendations are provided:
    - Study the accepted recommendations to understand user preferences
    - Avoid repeating exact recommendations that were previously unaccepted
    - Generate new recommendations that align with the style and complexity of accepted recommendations
-4. Return ONLY a valid JSON object in exactly this format (no other text before or after):
+   
+5. Return ONLY a valid JSON object in exactly this format (no other text before or after):
 
 {{
     "Sleep": [
@@ -147,17 +163,20 @@ Your task is to:
 }}
 
 Guidelines:
-1. Generate EXACTLY the number of recommendations specified for each category
-2. For each recommendation, specify the risk cluster it addresses from the risk analysis results
-3. Recommendations should be specific and actionable
-4. Focus on lifestyle changes that don't require special equipment
-5. Avoid medical advice or treatment suggestions
-6. Keep recommendations simple and achievable
-7. Include clear frequency guidelines
-8. Explanations should reference the data from the SOAP note or risk analysis
-9. If past accepted recommendations exist, maintain a similar style and complexity level
-10. Ensure new recommendations are unique and not duplicates of past ones
-11. Return ONLY the JSON object - no other text, no markdown formatting
+1. Generate EXACTLY the number of recommendations specified for each category, but NEVER less than 2
+2. Ensure all recommendations are UNIQUE and DISTINCT from each other - each recommendation should target a different aspect of health within its category
+3. For each recommendation, specify the risk cluster it addresses from the risk analysis results
+4. Recommendations should be specific and actionable
+5. Focus on lifestyle changes that don't require special equipment
+6. Avoid medical advice or treatment suggestions
+7. Keep recommendations simple and achievable
+8. Include clear frequency guidelines
+9. Explanations should reference the data from the SOAP note, risk analysis, or user notes
+10. If past accepted recommendations exist, maintain a similar style and complexity level
+11. Ensure new recommendations are unique and not duplicates of past ones
+12. Avoid extreme similarity between recommendations - each should offer a different approach or target a different aspect
+13. When user notes mention specific activities, habits, preferences, or physical/mental feelings, tailor recommendations to address or incorporate these personal aspects
+14. Return ONLY the JSON object - no other text, no markdown formatting
 
 IMPORTANT: Your response must be a valid JSON object and nothing else. Do not include any explanatory text, markdown formatting, or code blocks."""
 
@@ -270,8 +289,8 @@ def get_recommendations():
         logger.info(f"Getting stored risk analysis for user {user_id}")
         
         # Make internal request to risk analysis GET endpoint
-        #base_url = "https://eon-550878280011.us-central1.run.app"
-        base_url = "http://localhost:8000"
+        base_url = "https://eon-550878280011.us-central1.run.app"
+        #base_url = "http://localhost:8000"
         risk_analysis_response = requests.get(
             f"{base_url}/api/risk-analysis/{user_id}",
             headers={"Content-Type": "application/json"},
@@ -314,6 +333,10 @@ def get_recommendations():
             # Get past recommendations for the user
             past_recommendations = retrieve_user_recommendations(user_id)
             
+            # Get user notes for the user
+            user_notes = retrieve_user_notes(user_id)
+            logger.info(f"Retrieved {len(user_notes)} notes for user {user_id}")
+            
         except json.JSONDecodeError as e:
             logger.error(f"Failed to decode risk analysis response: {str(e)}")
             logger.error(f"Response content: {risk_analysis_response.text}")
@@ -321,8 +344,8 @@ def get_recommendations():
                 'error': 'Invalid response from risk analysis service'
             }), 500
             
-        # Generate recommendations using stored predictions, generated SOAP note, and past recommendations
-        recommendations = generate_recommendations(soap_note, formatted_predictions, past_recommendations)
+        # Generate recommendations using stored predictions, generated SOAP note, past recommendations, and user notes
+        recommendations = generate_recommendations(soap_note, formatted_predictions, past_recommendations, user_notes)
         
         # Store recommendations in database
         storage_success = store_recommendations(user_id, recommendations)
@@ -334,7 +357,8 @@ def get_recommendations():
             'source_data': {
                 'soap_note': soap_note,
                 'formatted_predictions': formatted_predictions,
-                'past_recommendations': past_recommendations
+                'past_recommendations': past_recommendations,
+                'user_notes': user_notes
             },
             'user_id': user_id
         }
