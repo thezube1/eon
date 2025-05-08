@@ -141,6 +141,71 @@ def get_metrics_by_interval(device_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@health_bp.route('/ppg-ir', methods=['POST'])
+def store_ppg_ir_data():
+    try:
+        data = request.get_json()
+        logger.info("Received PPG IR window data")
+        
+        # Extract device info
+        device_id = data.get('device_id')
+        if not device_id:
+            return jsonify({'error': 'Device ID is required'}), 400
+
+        # First verify the device exists
+        device_response = supabase.table('devices').select('id').eq('device_id', device_id).execute()
+        
+        if not device_response.data:
+            # Create new device if it doesn't exist
+            logger.info(f"Creating new device record for device ID: {device_id}")
+            device_response = supabase.table('devices').insert({
+                'device_id': device_id,
+                'device_name': data.get('device_name', 'Arduino PPG Device'),
+                'device_model': data.get('device_model', 'MAX30105')
+            }).execute()
+            
+        device_internal_id = device_response.data[0]['id']
+        
+        # Process PPG IR window data
+        ppg_record = {
+            'device_id': device_internal_id,
+            'timestamp': data.get('timestamp', datetime.utcnow().isoformat()),
+            'sampling_rate': data.get('sampling_rate'),
+            'window_size': data.get('window_size'),
+            'ir_values': data.get('ir_values'),
+            'min_raw_value': data.get('min_raw_value'),
+            'max_raw_value': data.get('max_raw_value'),
+            'avg_raw_value': data.get('avg_raw_value'),
+            'avg_bpm': data.get('avg_bpm'),
+            'source': data.get('source', 'Arduino MAX30105'),
+            'context': data.get('context', 'resting')
+        }
+        
+        # Validate required fields
+        required_fields = ['sampling_rate', 'window_size', 'ir_values']
+        for field in required_fields:
+            if not ppg_record.get(field):
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        # Insert the record
+        result = supabase.table('ppg_ir_windows').insert(ppg_record).execute()
+        
+        # Update sync status
+        supabase.table('sync_status').upsert({
+            'device_id': device_internal_id,
+            'metric_type': 'ppg_ir',
+            'last_sync_time': datetime.utcnow().isoformat()
+        }, on_conflict='device_id,metric_type').execute()
+
+        return jsonify({
+            'message': 'PPG IR window data stored successfully',
+            'id': result.data[0]['id'] if result.data else None
+        })
+
+    except Exception as e:
+        logger.error(f"Error storing PPG IR data: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 @health_bp.route('/sync', methods=['POST'])
 def sync_health_data():
     try:

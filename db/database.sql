@@ -110,6 +110,25 @@ CREATE TABLE IF NOT EXISTS body_measurements (
     CONSTRAINT valid_measurement CHECK (value > 0)
 );
 
+CREATE TABLE IF NOT EXISTS ppg_ir_windows (
+    id SERIAL PRIMARY KEY,
+    device_id INTEGER REFERENCES devices(id) NOT NULL,
+    timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+    sampling_rate INTEGER NOT NULL,
+    window_size INTEGER NOT NULL,
+    ir_values JSONB NOT NULL,  -- Array of normalized IR values
+    min_raw_value BIGINT,      -- Minimum raw IR value in window
+    max_raw_value BIGINT,      -- Maximum raw IR value in window
+    avg_raw_value DECIMAL(12,2),  -- Average raw IR value in window
+    avg_bpm DECIMAL(5,2),      -- Average heart rate during window
+    source VARCHAR(100),       -- e.g., "Eon Health Watch"
+    context VARCHAR(50),       -- e.g., "resting", "workout"
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT valid_window CHECK (window_size > 0 AND sampling_rate > 0)
+);
+
+CREATE INDEX idx_ppg_ir_windows_timestamp ON ppg_ir_windows (device_id, timestamp);
+
 -- Add new metric types to sync_status
 ALTER TABLE sync_status
     DROP CONSTRAINT IF EXISTS sync_status_metric_type_check;

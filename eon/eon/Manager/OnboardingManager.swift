@@ -1,8 +1,9 @@
 import Foundation
 import HealthKit
 import UIKit
+import Combine
 
-class OnboardingManager {
+class OnboardingManager: ObservableObject {
     let healthStore = HKHealthStore()
     private let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? "unknown"
     private let dateFormatter = ISO8601DateFormatter()
@@ -83,46 +84,60 @@ class OnboardingManager {
     
     // Main function to start the onboarding process
     func startOnboarding() async {
-        isOnboarding = true
-        onboardingProgress = 0.0
-        error = nil
+        DispatchQueue.main.async {
+            self.isOnboarding = true
+            self.onboardingProgress = 0.0
+            self.error = nil
+        }
         
         print("Starting health data onboarding...")
         
         // Step 1: Request HealthKit authorization
         let authorized = await requestAuthorization()
         if !authorized {
-            isOnboarding = false
-            error = "Failed to get HealthKit authorization"
+            DispatchQueue.main.async {
+                self.isOnboarding = false
+                self.error = "Failed to get HealthKit authorization"
+            }
             return
         }
         
-        onboardingProgress = 0.1
+        DispatchQueue.main.async {
+            self.onboardingProgress = 0.1
+        }
         
         // Step 2: Fetch historical health data
         do {
             // Fetch all health data for the past 30 days
             let healthData = await fetchHistoricalHealthData()
             
-            onboardingProgress = 0.6
+            DispatchQueue.main.async {
+                self.onboardingProgress = 0.6
+            }
             
             // Step 3: Send data to server
             try await NetworkManager.shared.onboardHealthData(deviceId: deviceId, healthData: healthData)
             
-            onboardingProgress = 0.8
+            DispatchQueue.main.async {
+                self.onboardingProgress = 0.8
+            }
             
             // Step 4: Trigger risk analysis and recommendations
             await generateAnalysisAndRecommendations()
             
-            onboardingProgress = 1.0
-            onboardingCompleted = true
-            isOnboarding = false
+            DispatchQueue.main.async {
+                self.onboardingProgress = 1.0
+                self.onboardingCompleted = true
+                self.isOnboarding = false
+            }
             
             print("Onboarding completed successfully")
         } catch {
             print("Onboarding error: \(error)")
-            self.error = "Failed to complete onboarding: \(error.localizedDescription)"
-            isOnboarding = false
+            DispatchQueue.main.async {
+                self.error = "Failed to complete onboarding: \(error.localizedDescription)"
+                self.isOnboarding = false
+            }
         }
     }
     
@@ -133,33 +148,43 @@ class OnboardingManager {
         // Heart Rate
         if let heartRateData = await fetchHeartRateData() {
             healthData["heart_rate"] = heartRateData
-            onboardingProgress += 0.1
+            DispatchQueue.main.async {
+                self.onboardingProgress += 0.1
+            }
         }
         
         // Steps
         if let stepData = await fetchStepData() {
             healthData["steps"] = stepData
-            onboardingProgress += 0.1
+            DispatchQueue.main.async {
+                self.onboardingProgress += 0.1
+            }
         }
         
         // Sleep
         if let sleepData = await fetchSleepData() {
             healthData["sleep"] = sleepData
-            onboardingProgress += 0.1
+            DispatchQueue.main.async {
+                self.onboardingProgress += 0.1
+            }
         }
         
         // Characteristics
         let characteristics = await fetchCharacteristics()
         if !characteristics.isEmpty {
             healthData["characteristics"] = [characteristics]
-            onboardingProgress += 0.1
+            DispatchQueue.main.async {
+                self.onboardingProgress += 0.1
+            }
         }
         
         // Body measurements
         let bodyMeasurements = await fetchBodyMeasurements()
         if !bodyMeasurements.isEmpty {
             healthData["body_measurements"] = bodyMeasurements
-            onboardingProgress += 0.1
+            DispatchQueue.main.async {
+                self.onboardingProgress += 0.1
+            }
         }
         
         return healthData
@@ -316,34 +341,30 @@ class OnboardingManager {
     private func fetchCharacteristics() async -> [String: Any] {
         var characteristics: [String: Any] = [:]
         
+        // Date of Birth - handle as optional
         do {
-            // Date of Birth - handle as optional
-            do {
-                let dobComponents = try healthStore.dateOfBirthComponents()
-                if let date = Calendar.current.date(from: dobComponents) {
-                    characteristics["date_of_birth"] = dateFormatter.string(from: date)
-                }
-            } catch {
-                print("Error fetching date of birth: \(error)")
-            }
-            
-            // Biological Sex - handle as optional
-            do {
-                let biologicalSex = try healthStore.biologicalSex().biologicalSex
-                characteristics["biological_sex"] = biologicalSex.rawValue
-            } catch {
-                print("Error fetching biological sex: \(error)")
-            }
-            
-            // Blood Type - handle as optional
-            do {
-                let bloodType = try healthStore.bloodType().bloodType
-                characteristics["blood_type"] = bloodType.rawValue
-            } catch {
-                print("Error fetching blood type: \(error)")
+            let dobComponents = try healthStore.dateOfBirthComponents()
+            if let date = Calendar.current.date(from: dobComponents) {
+                characteristics["date_of_birth"] = dateFormatter.string(from: date)
             }
         } catch {
-            print("Error fetching characteristics: \(error)")
+            print("Error fetching date of birth: \(error)")
+        }
+        
+        // Biological Sex - handle as optional
+        do {
+            let biologicalSex = try healthStore.biologicalSex().biologicalSex
+            characteristics["biological_sex"] = biologicalSex.rawValue
+        } catch {
+            print("Error fetching biological sex: \(error)")
+        }
+        
+        // Blood Type - handle as optional
+        do {
+            let bloodType = try healthStore.bloodType().bloodType
+            characteristics["blood_type"] = bloodType.rawValue
+        } catch {
+            print("Error fetching blood type: \(error)")
         }
         
         return characteristics

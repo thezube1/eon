@@ -251,42 +251,32 @@ class HealthManager: ObservableObject {
            }
 
            // Add characteristics data
+           var characteristics: [String: Any] = [:]
+           let dateFormatter = ISO8601DateFormatter()
+           
+           // Date of Birth - handle as optional
            do {
-               var characteristics: [String: Any] = [:]
-               let dateFormatter = ISO8601DateFormatter()
-               
-               // Date of Birth - handle as optional
-               do {
-                   let dobComponents = try healthStore.dateOfBirthComponents()
-                   if let date = Calendar.current.date(from: dobComponents) {
-                       characteristics["date_of_birth"] = dateFormatter.string(from: date)
-                   }
-               } catch {
-                   print("Error fetching date of birth: \(error)")
+               let dobComponents = try healthStore.dateOfBirthComponents()
+               if let date = Calendar.current.date(from: dobComponents) {
+                   characteristics["date_of_birth"] = dateFormatter.string(from: date)
                }
-               
-               // Biological Sex - handle as optional
-               do {
-                   let biologicalSex = try healthStore.biologicalSex().biologicalSex
-                   characteristics["biological_sex"] = biologicalSex.rawValue
-               } catch {
-                   print("Error fetching biological sex: \(error)")
-               }
-               
-               // Blood Type - handle as optional
-               do {
-                   let bloodType = try healthStore.bloodType().bloodType
-                   characteristics["blood_type"] = bloodType.rawValue
-               } catch {
-                   print("Error fetching blood type: \(error)")
-               }
-               
-               // Only add characteristics if we have at least one value
-               if !characteristics.isEmpty {
-                   healthData["characteristics"] = [characteristics]
-               }
-           } catch {
-               print("Error processing characteristics: \(error)")
+           }
+           
+           // Biological Sex - handle as optional
+           do {
+               let biologicalSex = try healthStore.biologicalSex().biologicalSex
+               characteristics["biological_sex"] = biologicalSex.rawValue
+           }
+           
+           // Blood Type - handle as optional
+           do {
+               let bloodType = try healthStore.bloodType().bloodType
+               characteristics["blood_type"] = bloodType.rawValue
+           }
+           
+           // Only add characteristics if we have at least one value
+           if !characteristics.isEmpty {
+               healthData["characteristics"] = [characteristics]
            }
            
            // Add body measurements data

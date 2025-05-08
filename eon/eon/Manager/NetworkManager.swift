@@ -184,9 +184,9 @@ class NetworkManager {
         
         let deviceInfo: [String: Any] = [
             "device_id": deviceId,
-            "device_name": UIDevice.current.name,
-            "device_model": UIDevice.current.model,
-            "os_version": UIDevice.current.systemVersion
+            "device_name": await UIDevice.current.name,
+            "device_model": await UIDevice.current.model,
+            "os_version": await UIDevice.current.systemVersion
         ]
         
         var bodyDict = healthData
@@ -225,9 +225,9 @@ class NetworkManager {
         
         let deviceInfo: [String: Any] = [
             "device_id": deviceId,
-            "device_name": UIDevice.current.name,
-            "device_model": UIDevice.current.model,
-            "os_version": UIDevice.current.systemVersion
+            "device_name": await UIDevice.current.name,
+            "device_model": await UIDevice.current.model,
+            "os_version": await UIDevice.current.systemVersion
         ]
         
         var bodyDict = healthData

@@ -66,8 +66,8 @@ struct OnboardingView: View {
                 }
             }
             .padding()
-            .onChange(of: onboardingManager.onboardingCompleted) { completed in
-                if completed {
+            .onChange(of: onboardingManager.onboardingCompleted) { oldValue, newValue in
+                if newValue {
                     // Mark onboarding as complete when finished
                     hasCompletedOnboarding = true
                     isAuthorized = true
